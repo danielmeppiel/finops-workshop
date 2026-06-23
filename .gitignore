@@ -1,0 +1,20 @@
+# Generated personal telemetry — NEVER commit (contains real session costs/usage)
+*.db
+demos/demo3-meter/dashboard_data.json
+demos/demo3-meter/data/
+demos/demo3-meter/*.local.json
+
+# Python / env
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# Demo 3 — local-only personal telemetry (regenerate with build_db.py + export_dashboard.py)
+demos/demo3-meter/dashboard.html
+demos/demo3-meter/EVIDENCE.md
+demos/demo3-meter/*_b44.json
+demos/demo3-meter/testdata/
