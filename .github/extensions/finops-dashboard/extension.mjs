@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { joinSession, createCanvas, CanvasError } from "@github/copilot-sdk/extension";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -42,6 +43,61 @@ async function loadData() {
     }
     const raw = await readFile(path, "utf-8");
     return JSON.parse(raw);
+}
+
+// ---- raw session-log reader (per-session events.jsonl) ------------------
+// Local OTel-style event stream lives at ~/.copilot/session-state/<sid>/events.jsonl.
+// We never serve it verbatim: lines can be ~1MB (a single assistant message), so we
+// flatten each event to a compact, truncated record the modal can render quickly.
+const STATE_DIR = join(homedir(), ".copilot", "session-state");
+const STR_CAP = 1200;      // clip any single string field
+const EVENT_CAP = 6000;    // clip a whole event's pretty JSON
+const MAX_EVENTS = 6000;   // hard cap on events returned
+
+function truncStrings(o, max) {
+    if (typeof o === "string") return o.length > max ? o.slice(0, max) + "… [" + (o.length - max) + " more chars]" : o;
+    if (Array.isArray(o)) return o.map((x) => truncStrings(x, max));
+    if (o && typeof o === "object") { const r = {}; for (const k of Object.keys(o)) r[k] = truncStrings(o[k], max); return r; }
+    return o;
+}
+
+function oneLine(s, n) { return String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n); }
+
+function summarize(type, d) {
+    d = d || {};
+    if (type === "skill.invoked") return [d.name, d.source ? "via " + d.source : "", d.trigger || ""].filter(Boolean).join("  ·  ");
+    if (type === "tool.execution_start" || type === "tool.execution_complete") return [d.toolName, d.model].filter(Boolean).join("  ·  ");
+    if (type === "assistant.message") return [d.model, d.outputTokens != null ? d.outputTokens + " out" : "", oneLine(d.content, 90)].filter(Boolean).join("  ·  ");
+    if (type === "user.message") return [d.source ? "source=" + d.source : "human", oneLine(d.content || d.transformedContent, 110)].filter(Boolean).join("  ·  ");
+    if (type === "subagent.started" || type === "subagent.completed") return d.agentDisplayName || d.agentName || "";
+    if (type === "session.compaction_start") return ["sys " + (d.systemTokens || 0), "conv " + (d.conversationTokens || 0)].join("  ·  ");
+    const k = ["name", "toolName", "agentName", "model", "source", "message"].find((x) => d[x] != null);
+    return k ? oneLine(d[k], 110) : "";
+}
+
+async function buildLogs(sid) {
+    const file = join(STATE_DIR, sid, "events.jsonl");
+    if (!existsSync(file)) return { error: "no_events", message: "No events.jsonl for this session (live or already pruned)." };
+    const raw = await readFile(file, "utf-8");
+    const lines = raw.split("\n");
+    const events = [];
+    let total = 0;
+    const typeCounts = {};
+    for (const ln of lines) {
+        if (!ln.trim()) continue;
+        total++;
+        let o;
+        try { o = JSON.parse(ln); } catch { continue; }
+        const type = o.type || o.event || "?";
+        typeCounts[type] = (typeCounts[type] || 0) + 1;
+        if (events.length >= MAX_EVENTS) continue;
+        const ts = typeof o.timestamp === "string" ? o.timestamp : "";
+        const time = ts.length >= 19 ? ts.slice(11, 19) : "";
+        let text = JSON.stringify(truncStrings(o, STR_CAP), null, 2);
+        if (text.length > EVENT_CAP) text = text.slice(0, EVENT_CAP) + "\n… [event truncated]";
+        events.push({ time, date: ts.slice(0, 10), type, summary: summarize(type, o.data), text });
+    }
+    return { session: sid, total, returned: events.length, truncated: total > events.length, typeCounts, events };
 }
 
 function renderHtml(data) {
@@ -114,7 +170,25 @@ function renderHtml(data) {
   .modal h4 { margin:16px 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-color-muted,#8b949e); }
   .mclose { float:right; cursor:pointer; border:1px solid var(--border-color-default,#30363d); background:var(--background-color-muted,#161b22); color:var(--text-color-default,#e6edf3); border-radius:8px; padding:4px 10px; font-size:12px; }
   .mcards { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:6px 0 4px; }
-  @media (max-width: 900px) { .cards { grid-template-columns: repeat(3,1fr); } .mcards { grid-template-columns:repeat(2,1fr); } }
+  .pager { display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:10px; font-size:12px; color:var(--text-color-muted,#8b949e); }
+  .pager button { background:var(--background-color-muted,#161b22); color:var(--text-color-default,#e6edf3); border:1px solid var(--border-color-default,#30363d); border-radius:7px; padding:4px 11px; font-size:12px; cursor:pointer; }
+  .pager button:hover:not(:disabled) { border-color:var(--bar); }
+  .pager button:disabled { opacity:.4; cursor:default; }
+  .logbtn { float:right; margin-right:8px; cursor:pointer; border:1px solid var(--bar); background:transparent; color:var(--text-color-default,#e6edf3); border-radius:8px; padding:4px 10px; font-size:12px; }
+  .logbtn:hover { background:color-mix(in srgb, var(--bar) 18%, transparent); }
+  .logtools { display:flex; gap:10px; align-items:center; margin:4px 0 10px; font-size:12px; color:var(--text-color-muted,#8b949e); flex-wrap:wrap; }
+  .logtools select { background:var(--background-color-default,#0d1117); color:var(--text-color-default,#e6edf3); border:1px solid var(--border-color-default,#30363d); border-radius:7px; padding:4px 8px; font-size:12px; }
+  .logview { max-height:62vh; overflow:auto; border:1px solid var(--border-color-default,#30363d); border-radius:10px; }
+  .ev { border-bottom:1px solid var(--border-color-muted,#21262d); }
+  .ev:last-child { border-bottom:none; }
+  .ev > summary { list-style:none; cursor:pointer; padding:7px 12px; display:grid; grid-template-columns:74px 188px 1fr; gap:10px; align-items:baseline; font-size:12px; }
+  .ev > summary::-webkit-details-marker { display:none; }
+  .ev:hover > summary { background:color-mix(in srgb, var(--bar) 9%, transparent); }
+  .ev .etime { color:var(--text-color-muted,#8b949e); font-variant-numeric:tabular-nums; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .ev .etype { color:var(--bar); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; }
+  .ev .esum { color:var(--text-color-default,#e6edf3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ev pre { margin:0; padding:10px 12px 14px; background:var(--background-color-inset,#010409); font-size:11.5px; line-height:1.5; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
+  @media (max-width: 900px) { .cards { grid-template-columns: repeat(3,1fr); } .mcards { grid-template-columns:repeat(2,1fr); } .ev > summary { grid-template-columns:64px 1fr; } .ev .etype { grid-column:2; } }
 </style>
 </head>
 <body>
@@ -175,6 +249,20 @@ function renderHtml(data) {
   try { const q=new URLSearchParams(location.search); ['from','to','model','skill'].forEach(k=>{ if(q.has(k)) state[k]=q.get(k); }); } catch(e){}
   const inRange = i => { const d=dayOf(i); return (!state.from || d>=state.from) && (!state.to || d<=state.to); };
 
+  const PAGE_SIZE = 10;
+  const page = { sessions:0, skills:0, tools:0 };
+  let LAST = null;
+  function pageSlice(kind, arr){ const p=page[kind]; return arr.slice(p*PAGE_SIZE, p*PAGE_SIZE+PAGE_SIZE); }
+  function pager(kind, total){
+    const pages = Math.max(1, Math.ceil(total/PAGE_SIZE));
+    if(page[kind] > pages-1) page[kind]=pages-1;
+    if(total<=PAGE_SIZE) return '';
+    const p=page[kind];
+    return '<div class="pager" data-kind="'+kind+'"><button data-act="prev"'+(p<=0?' disabled':'')+'>‹ Prev</button>'+
+      '<span>Page '+(p+1)+' / '+pages+' · '+fmtInt(total)+' total</span>'+
+      '<button data-act="next"'+(p>=pages-1?' disabled':'')+'>Next ›</button></div>';
+  }
+
   function compute(){
     const model=state.model, skill=state.skill;
     let skillSessions=null;
@@ -219,29 +307,32 @@ function renderHtml(data) {
       '</tbody></table>';
   }
   function renderSessions(c){
-    const s=c.sessions.slice(0,25); if(!s.length) return '<div class="empty">No sessions for this filter.</div>';
-    const max=Math.max(...s.map(r=>r.usd||0),1);
+    const all=c.sessions; if(!all.length) return '<div class="empty">No sessions for this filter.</div>';
+    const s=pageSlice('sessions',all);
+    const max=Math.max(...all.map(r=>r.usd||0),1);
     return '<table><thead><tr><th>Session</th><th>Date</th><th>Models</th><th class="num">USD</th><th class="num">Credits</th><th class="num">Tokens</th><th>Cost</th></tr></thead><tbody>'+
       s.map(r=>{ const ti=titleOf(r.s), sid=sidOf(r.s); const label=ti?esc(ti):esc(sid.slice(0,8));
         return '<tr class="srow" data-s="'+r.s+'" title="'+esc(sid)+(ti?' · '+esc(ti):'')+'"><td><div class="name">'+label+'</div><div class="sid">'+esc(sid.slice(0,8))+' · click to inspect</div></td><td class="num dt">'+esc(dayOf(r.s)||'—')+'</td><td class="models">'+esc(Array.from(r.models).sort().join(', '))+'</td><td class="num">'+fmtMoney(r.usd)+'</td><td class="num">'+fmtCredits(r.cred)+'</td><td class="num">'+fmtTok(r.t)+'</td>'+bar(r.usd,max)+'</tr>'; }).join('')+
-      '</tbody></table>';
+      '</tbody></table>'+pager('sessions',all.length);
   }
   function renderSkills(c){
-    const s=c.skills.slice(0,25); if(!s.length){ document.getElementById('skills-note').innerHTML='No skill invocations for this filter.'; return '<div class="empty">No skill invocations for this filter.</div>'; }
-    const max=Math.max(...s.map(r=>r.usd||0),1);
-    const top5=s.slice(0,5).reduce((a,r)=>a+r.usd,0);
+    const all=c.skills; if(!all.length){ document.getElementById('skills-note').innerHTML='No skill invocations for this filter.'; return '<div class="empty">No skill invocations for this filter.</div>'; }
+    const s=pageSlice('skills',all);
+    const max=Math.max(...all.map(r=>r.usd||0),1);
+    const top5=all.slice(0,5).reduce((a,r)=>a+r.usd,0);
     const conc = c.skillTotUsd ? top5/c.skillTotUsd : 0;
     document.getElementById('skills-note').innerHTML='<b>Calls, sessions &amp; window output are measured</b> from each <code>skill.invoked</code> until the next skill, the next HUMAN turn, or session end (synthetic skill-context messages no longer truncate the window; a new skill overtakes the prior one, so windows do not overlap). <b>Input / cache / $ (est)</b> apportion the metered session cost by that window\\'s output share (modeled, reconciles to metered). Top 5 skills = <b>'+fmtPct(conc)+'</b> of modeled skill $ — your <b>codify-the-loop</b> candidates.';
     return '<table><thead><tr><th>Skill (loop)</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Win input</th><th class="num">Win cache rd</th><th class="num">Win output</th><th class="num">Window $ (est)</th><th>Window cost</th></tr></thead><tbody>'+
       s.map(r=>'<tr><td class="name">'+esc(r.skill)+'</td><td class="num">'+fmtInt(r.calls)+'</td><td class="num">'+fmtInt(r.sessions.size)+'</td><td class="num">'+fmtTok(r.i)+'</td><td class="num">'+fmtTok(r.cr)+'</td><td class="num">'+fmtTok(r.o)+'</td><td class="num">'+fmtMoney(r.usd)+'</td>'+bar(r.usd,max,'')+'</tr>').join('')+
-      '</tbody></table>';
+      '</tbody></table>'+pager('skills',all.length);
   }
   function renderTools(c){
-    const s=c.tools.slice(0,25); if(!s.length) return '<div class="empty">No tool calls for this filter.</div>';
-    const max=Math.max(...s.map(r=>r.calls||0),1);
+    const all=c.tools; if(!all.length) return '<div class="empty">No tool calls for this filter.</div>';
+    const s=pageSlice('tools',all);
+    const max=Math.max(...all.map(r=>r.calls||0),1);
     return '<table><thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Sessions</th><th>Usage</th></tr></thead><tbody>'+
       s.map(r=>'<tr><td class="name">'+esc(r.tool)+'</td><td class="num">'+fmtInt(r.calls)+'</td><td class="num">'+fmtInt(r.sessions.size)+'</td>'+bar(r.calls,max,'')+'</tr>').join('')+
-      '</tbody></table>';
+      '</tbody></table>'+pager('tools',all.length);
   }
 
   function openInspector(s){
@@ -251,6 +342,7 @@ function renderHtml(data) {
     const ft=FT.filter(r=>r.s===s).slice().sort((a,b)=>(b.c||0)-(a.c||0));
     let tUsd=0,tCred=0,tTok=0,tReq=0; for(const r of sm){ tUsd+=r.usd||0; tCred+=r.cred||0; tTok+=r.t||0; tReq+=r.rq||0; }
     let h='<button class="mclose" id="mclose">Close ✕</button>';
+    h+='<button class="logbtn" id="mlogs">⌗ Logs</button>';
     h+='<h3>'+(ti?esc(ti):esc(sid.slice(0,8)))+'</h3>';
     h+='<div class="msub">'+esc(sid)+' · '+esc(day||'—')+'</div>';
     h+='<div class="mcards">'+
@@ -280,19 +372,58 @@ function renderHtml(data) {
     document.getElementById('modal').innerHTML=h;
     document.getElementById('ov').classList.add('open');
     document.getElementById('mclose').addEventListener('click',closeInspector);
+    document.getElementById('mlogs').addEventListener('click',()=>renderLogs(s));
   }
   function closeInspector(){ document.getElementById('ov').classList.remove('open'); }
 
+  async function renderLogs(s){
+    const sid=sidOf(s), ti=titleOf(s);
+    const modal=document.getElementById('modal');
+    modal.innerHTML='<button class="mclose" id="mclose">Close ✕</button><button class="logbtn" id="mback">‹ Back</button>'+
+      '<h3>'+(ti?esc(ti):esc(sid.slice(0,8)))+'</h3><div class="msub">'+esc(sid)+' · raw session event log</div>'+
+      '<div class="empty" id="logbody">Loading events…</div>';
+    document.getElementById('mclose').addEventListener('click',closeInspector);
+    document.getElementById('mback').addEventListener('click',()=>openInspector(s));
+    let data;
+    try { const r=await fetch('/api/logs?session='+encodeURIComponent(sid)); data=await r.json(); }
+    catch(e){ document.getElementById('logbody').textContent='Failed to load logs: '+e; return; }
+    if(!data || data.error){ document.getElementById('logbody').textContent=(data&&data.message)||'No logs available for this session.'; return; }
+    const body=document.getElementById('logbody'); body.className='';
+    const types=Object.keys(data.typeCounts||{}).sort();
+    const opts='<option value="">all types</option>'+types.map(t=>'<option value="'+esc(t)+'">'+esc(t)+' ('+fmtInt(data.typeCounts[t])+')</option>').join('');
+    body.innerHTML='<div class="logtools"><label>Filter <select id="logtype">'+opts+'</select></label>'+
+      '<span>'+(data.truncated?'showing first '+fmtInt(data.returned)+' of '+fmtInt(data.total):fmtInt(data.total))+' events · strings clipped for display</span>'+
+      '</div><div class="logview" id="logview"></div>';
+    const view=document.getElementById('logview');
+    function paintLog(filter){
+      const evs=filter?data.events.filter(e=>e.type===filter):data.events;
+      view.innerHTML=evs.length?evs.map(e=>'<details class="ev"><summary><span class="etime">'+esc(e.time||'')+'</span><span class="etype">'+esc(e.type)+'</span><span class="esum">'+esc(e.summary||'')+'</span></summary><pre>'+esc(e.text)+'</pre></details>').join(''):'<div class="empty">No events of this type.</div>';
+    }
+    paintLog('');
+    document.getElementById('logtype').addEventListener('change',ev=>paintLog(ev.target.value));
+  }
+
+  function paint(kind){
+    const el=document.getElementById(kind);
+    el.innerHTML = kind==='sessions'?renderSessions(LAST):kind==='skills'?renderSkills(LAST):renderTools(LAST);
+    const pg=el.querySelector('.pager');
+    if(pg){ pg.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
+      const tot = kind==='sessions'?LAST.sessions.length:kind==='skills'?LAST.skills.length:LAST.tools.length;
+      const pages=Math.max(1,Math.ceil(tot/PAGE_SIZE));
+      page[kind]= b.getAttribute('data-act')==='prev'?Math.max(0,page[kind]-1):Math.min(pages-1,page[kind]+1);
+      paint(kind);
+    })); }
+    if(kind==='sessions'){ el.querySelectorAll('.srow').forEach(elm=>elm.addEventListener('click',()=>openInspector(parseInt(elm.getAttribute('data-s'),10)))); }
+  }
+
   function renderAll(){
-    const c=compute();
-    document.getElementById('cards').innerHTML=renderCards(c);
-    document.getElementById('models').innerHTML=renderModels(c);
-    document.getElementById('sessions').innerHTML=renderSessions(c);
-    document.getElementById('skills').innerHTML=renderSkills(c);
-    document.getElementById('tools').innerHTML=renderTools(c);
-    const rows=document.querySelectorAll('#sessions .srow'); for(const el of rows){ el.addEventListener('click',()=>openInspector(parseInt(el.getAttribute('data-s'),10))); }
+    LAST=compute();
+    page.sessions=0; page.skills=0; page.tools=0;
+    document.getElementById('cards').innerHTML=renderCards(LAST);
+    document.getElementById('models').innerHTML=renderModels(LAST);
+    paint('sessions'); paint('skills'); paint('tools');
     const flt=[]; if(state.model) flt.push('model='+state.model); if(state.skill) flt.push('skill='+state.skill);
-    document.getElementById('frange').textContent=(state.from||'…')+' → '+(state.to||'…')+(flt.length?'  ·  '+flt.join('  ·  '):'')+'  ·  '+fmtInt(c.sessCount)+' sessions';
+    document.getElementById('frange').textContent=(state.from||'…')+' → '+(state.to||'…')+(flt.length?'  ·  '+flt.join('  ·  '):'')+'  ·  '+fmtInt(LAST.sessCount)+' sessions';
   }
 
   function initControls(){
@@ -321,6 +452,21 @@ async function startServer(instanceId) {
     let cached = null;
     const server = createServer(async (req, res) => {
         try {
+            const u = new URL(req.url, "http://127.0.0.1");
+            if (u.pathname === "/api/logs") {
+                const sid = u.searchParams.get("session") || "";
+                if (!/^[0-9a-fA-F-]{8,40}$/.test(sid)) {
+                    res.statusCode = 400;
+                    res.setHeader("Content-Type", "application/json");
+                    res.end(JSON.stringify({ error: "bad_session", message: "Invalid session id." }));
+                    return;
+                }
+                const payload = await buildLogs(sid);
+                res.statusCode = payload && payload.error ? 404 : 200;
+                res.setHeader("Content-Type", "application/json; charset=utf-8");
+                res.end(JSON.stringify(payload));
+                return;
+            }
             if (!cached) cached = renderHtml(await loadData());
             res.setHeader("Content-Type", "text/html; charset=utf-8");
             res.end(cached);
