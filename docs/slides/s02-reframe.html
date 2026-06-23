@@ -4,24 +4,35 @@
 <div class="slide">
   <div class="kick">The reframe</div>
   <h1 class="ttl">A variance you engineer, not a price you negotiate.</h1>
-  <div class="gov">The bill is a property of the design, not of the task.</div>
+  <div class="gov">Model rate × token volume. The loop sets both.</div>
 
-  <div style="position:absolute;left:185px;top:236px;width:910px;text-align:center">
-    <div style="font-size:56px;font-weight:800;letter-spacing:-1.4px;line-height:1.08">A variance you engineer,<br><span style="color:var(--muted)">not a price you negotiate.</span></div>
+  <div class="loop-pill">
+    <div>LOOP</div><span>sets both</span>
   </div>
 
-  <svg width="680" height="142" viewBox="0 0 680 142" style="position:absolute;left:300px;top:464px" xmlns="http://www.w3.org/2000/svg">
-    <text x="80" y="32" text-anchor="middle" font-size="16" font-weight="800" fill="#37414f" font-family="var(--font)">model</text>
-    <text x="340" y="32" text-anchor="middle" font-size="16" font-weight="800" fill="#37414f" font-family="var(--font)">tokens</text>
-    <text x="600" y="32" text-anchor="middle" font-size="16" font-weight="800" fill="#7c2d12" font-family="var(--font)">LOOP</text>
-    <circle cx="80" cy="82" r="20" fill="none" stroke="#9aa3b0" stroke-width="4"/>
-    <circle cx="340" cy="82" r="20" fill="none" stroke="#9aa3b0" stroke-width="4"/>
-    <circle cx="572" cy="82" r="20" fill="#c26b3f"/><circle cx="610" cy="82" r="20" fill="#c26b3f"/><circle cx="648" cy="82" r="20" fill="#c26b3f"/>
-    <path d="M610 118 v18" stroke="#c26b3f" stroke-width="3"/><path d="M600 128 l10 10 10-10" fill="none" stroke="#c26b3f" stroke-width="3"/>
-    <text x="610" y="142" text-anchor="middle" font-size="13" font-weight="800" fill="#7c2d12" font-family="var(--font)">the big lever</text>
+  <svg width="620" height="100" viewBox="0 0 620 100" style="position:absolute;left:330px;top:252px" xmlns="http://www.w3.org/2000/svg">
+    <defs><marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6c7931"/></marker></defs>
+    <path d="M310 0 C260 34 225 54 192 84" stroke="#6c7931" stroke-width="4" fill="none" marker-end="url(#a)"/>
+    <path d="M310 0 C380 34 463 54 506 84" stroke="#6c7931" stroke-width="4" fill="none" marker-end="url(#a)"/>
   </svg>
 
-  <div class="src"><b>Source:</b> deck synthesis — model, tokens, loop; the loop controls the tail.</div>
+  <div class="bill">BILL</div>
+  <div class="eq">=</div>
+  <div class="factor model"><b>MODEL</b><span>rate</span><em>$/Mtok</em></div>
+  <div class="times">×</div>
+  <div class="factor tokens"><b>TOKENS</b><span>volume</span><em>turns × context</em></div>
+
+  <div class="src"><b>Source:</b> deck synthesis — model rate × token volume; loop design controls both.</div>
   <div class="tagr">The Agentic SDLC Bill</div>
 </div>
+<style>
+  .loop-pill{position:absolute;left:495px;top:178px;width:290px;height:76px;border-radius:18px;background:var(--olive);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 14px 30px rgba(16,24,40,.12)}
+  .loop-pill div{font-size:30px;font-weight:800;letter-spacing:.8px}.loop-pill span{font-size:13px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:#eef0e0;margin-top:3px}
+  .bill{position:absolute;left:120px;top:358px;width:170px;height:132px;border-radius:18px;background:#26261f;color:#fff;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:800;letter-spacing:.6px}
+  .eq,.times{position:absolute;top:400px;width:44px;text-align:center;font-size:42px;font-weight:800;color:var(--slate)}
+  .eq{left:314px}.times{left:700px}
+  .factor{position:absolute;top:338px;width:300px;height:172px;border:1.5px solid var(--line);border-top:6px solid var(--slate);border-radius:18px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.06),0 14px 28px rgba(16,24,40,.08);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+  .factor.model{left:374px}.factor.tokens{left:762px}
+  .factor b{font-size:34px;letter-spacing:-.5px}.factor span{font-size:21px;font-weight:800;color:var(--slate);margin-top:10px}.factor em{font-style:normal;font-size:13px;color:var(--muted);margin-top:10px}
+</style>
 </body></html>
