@@ -1,0 +1,74 @@
+/* Shared hero-visual design system for the Agentic SDLC Bill. */
+:root{
+  --ink:#1b1f26; --muted:#5b6470; --line:#e3e7ee; --paper:#ffffff;
+  --blue:#0a6cff; --blue-deep:#0747a6; --green:#118a5b; --amber:#b86a00;
+  --violet:#6b3fd1; --teal:#0a8aa0; --slate:#37414f; --red:#c0362c;
+  --ink-dark:#0d1016; --cyan:#50e6ff;
+  /* cost palette (matches the infographic + ch07 mermaid) */
+  --rust:#c26b3f; --rust-deep:#9a4f2a; --rust-bg:#f6e0d3; --rust-ink:#7c2d12;
+  --olive:#6c7931; --olive-deep:#55611f; --olive-bg:#eef0e0; --olive-ink:#33401a;
+  --frontier:#26261f;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"SF Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:#fff}
+.slide{width:1280px;height:720px;background:#fff;position:relative;overflow:hidden;
+  font-family:var(--font);color:var(--ink)}
+
+/* shared header system */
+.kick{position:absolute;left:64px;top:46px;font-size:13px;font-weight:700;letter-spacing:1.6px;
+  text-transform:uppercase;color:var(--violet)}
+.kick.blue{color:var(--blue-deep)} .kick.green{color:var(--green)} .kick.cyan{color:var(--cyan)}
+.kick.rust{color:var(--rust)} .kick.olive{color:var(--olive)}
+.ttl{position:absolute;left:64px;top:66px;font-size:33px;font-weight:800;letter-spacing:-.6px;margin:0;max-width:1160px}
+.gov{position:absolute;left:64px;top:118px;font-size:15.5px;color:var(--slate);font-style:italic;max-width:1140px;line-height:1.35}
+.tagr{position:absolute;right:64px;bottom:30px;font-size:11.5px;color:var(--muted);text-align:right}
+.foot{position:absolute;left:64px;bottom:30px;font-size:12.5px;color:var(--slate);max-width:1000px}
+.foot b{color:var(--ink)}
+.src{position:absolute;left:64px;bottom:30px;font-size:11px;color:var(--muted);font-style:italic;max-width:1000px}
+.src b{color:var(--slate);font-style:normal}
+
+/* quote chip (verbatim source language) */
+.quote{position:absolute;left:64px;font-size:13px;color:var(--muted);font-style:italic;max-width:1100px}
+.quote .s{font-style:normal;font-weight:700;color:var(--violet);margin-right:6px;font-size:11px;letter-spacing:.4px}
+
+/* generic card */
+.card{position:absolute;background:#fff;border:1.5px solid var(--line);border-radius:14px;
+  box-shadow:0 1px 2px rgba(16,24,40,.06),0 10px 26px rgba(16,24,40,.07);padding:22px 24px}
+.card h3{margin:0 0 4px;font-size:18px;font-weight:800;letter-spacing:-.2px}
+.card .sub{font-size:12px;color:var(--muted);margin:0 0 14px}
+.badge{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.5px;
+  text-transform:uppercase;color:#fff;border-radius:7px;padding:5px 11px}
+.dot{width:9px;height:9px;border-radius:3px;display:inline-block}
+
+/* chip list */
+.chip{display:flex;align-items:flex-start;gap:9px;font-size:13.5px;color:var(--ink);margin:9px 0;line-height:1.35}
+.chip .m{width:8px;height:8px;border-radius:2px;margin-top:5px;flex:0 0 auto}
+.chip b{font-weight:700}
+
+/* mono command tag */
+.cmd{font-family:var(--mono);font-size:11px;background:#0f1117;color:#e6edf3;border-radius:7px;
+  padding:7px 10px;line-height:1.5;display:inline-block}
+
+/* price tag — used on the worked-example hero */
+.ptag{display:inline-flex;align-items:baseline;gap:5px;font-family:var(--mono);font-size:11px;font-weight:700;
+  border-radius:6px;padding:3px 8px;letter-spacing:.2px}
+.ptag.frontier{background:var(--frontier);color:#f1ede2}
+.ptag.mid{background:#e7edf7;color:#26405f;border:1px solid #c7d6ec}
+.ptag.light{background:var(--olive-bg);color:var(--olive-ink);border:1px solid #d2d9b4}
+
+/* dark surface (dividers / demos) */
+.slide.dark{background:radial-gradient(1100px 700px at 18% -10%,#15233f 0%,#0d1016 55%,#0a0c11 100%);color:#fff}
+.slide.dark .ttl{color:#fff}
+.slide.dark .gov{color:#aab3c2}
+.slide.dark .tagr{color:#6b7686}
+.slide.dark .kick{color:var(--cyan)}
+
+/* ---- print / PDF export (single 1280×720 landscape page per slide) ---- */
+@page{ size:13.333in 7.5in; margin:0; }
+@media print{
+  html,body{ width:1280px; height:720px; margin:0; padding:0; }
+  .slide{ box-shadow:none !important; border-radius:0 !important; }
+  *{ -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+}

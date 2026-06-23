@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<link rel="stylesheet" href="../app.css"><link rel="stylesheet" href="../base.css"></head>
+<body>
+<div class="slide">
+  <div class="kick rust">The bill</div>
+  <h1 class="ttl">One task — rename 19 files, tests stay green.</h1>
+  <div class="gov">Same outcome target. Same telemetry source. The bill swings because the loop changes.</div>
+
+  <div style="position:absolute;left:112px;top:190px;width:980px">
+    <div class="row good">
+      <div class="price">$4.81</div><div class="bar" style="width:112px"></div>
+      <div class="label"><b>right-sized loop</b><span>Sonnet · one sed call · 20 turns</span></div>
+    </div>
+    <div class="row bad">
+      <div class="price">$33.79</div><div class="bar" style="width:784px"></div>
+      <div class="label"><b>same model, worse loop</b><span>Sonnet · per-file loop · 105 turns · 290:1 in:out</span></div>
+      <div class="mult">7×</div>
+    </div>
+    <div class="row fail">
+      <div class="price">$41.01</div><div class="bar" style="width:952px"></div>
+      <div class="label"><b>premium default</b><span>Opus — FAILED the task</span></div>
+      <div class="mult">8.5×</div>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:64px;top:574px;width:1152px;border-top:1px solid var(--line);padding-top:22px;font-size:28px;font-weight:800;letter-spacing:-.4px;text-align:center">It's not the token price. <span style="color:var(--rust)">It's the loop.</span></div>
+  <div class="src"><b>Source:</b> genesis PR#12 cost reports — metered Copilot telemetry for the same bulk-rename task.</div>
+  <div class="tagr">The Agentic SDLC Bill</div>
+</div>
+<style>
+  .row{height:92px;position:relative;display:flex;align-items:center;gap:22px;margin-bottom:24px}
+  .price{width:118px;text-align:right;font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink)}
+  .bar{height:26px;border-radius:8px;box-shadow:0 7px 20px rgba(16,24,40,.10)}
+  .good .bar{background:var(--olive)} .bad .bar,.fail .bar{background:var(--rust)}
+  .label{position:absolute;left:280px;top:55px;font-size:15px;color:var(--slate)}
+  .label b{display:block;color:var(--ink);font-size:17px}.label span{display:block;margin-top:4px}
+  .mult{position:absolute;right:-48px;top:20px;font-size:26px;font-weight:800;color:var(--rust-ink)}
+</style>
+</body></html>

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>FinOps for Agentic Coding</title>
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header id="bar">
+    <div class="nav">
+      <button id="prev" title="Previous (←)" aria-label="Previous">‹</button>
+      <div class="counter"><span id="num">1</span><span class="of">/ 12</span></div>
+      <button id="next" title="Next (→)" aria-label="Next">›</button>
+    </div>
+    <div class="title" id="title">FinOps for Agentic Coding</div>
+    <div class="tools">
+      <button id="indexBtn" class="ghost" title="Slide index">☰ Index</button>
+      <button id="fsBtn" class="ghost" title="Present fullscreen (F)">⛶ Present</button>
+    </div>
+  </header>
+
+  <main id="stage">
+    <div id="scaler"><iframe id="frame" title="Slide" frameborder="0"></iframe></div>
+  </main>
+
+  <button id="fsExit" title="Exit fullscreen (Esc)" aria-label="Exit fullscreen" hidden>✕ Exit</button>
+
+  <div id="overlay" hidden>
+    <div class="overlay-head">
+      <strong>Jump to a slide</strong>
+      <button id="overlayClose" class="ghost">✕</button>
+    </div>
+    <div id="grid" class="grid"></div>
+  </div>
+
+  <script src="manifest.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

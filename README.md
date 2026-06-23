@@ -2,40 +2,80 @@
 
 > **Your agentic bill is a variance you _engineer_, not a price you _negotiate_. The lever is the loop.**
 
-Materials for the 1-hour FinOps session on controlling GitHub Copilot agentic-coding cost —
-for AI Champions / platform leads / admins (remote, English).
-Complements the developer-level enablement track; this session is about **cost control + the operating model**.
+A ~1-hour session for **AI Champions, platform leads, and admins** on controlling GitHub Copilot
+agentic-coding cost. Not developer basics — this is about **cost control and the operating model**:
+designing reusable, cost-effective agent workflows and governing the AI-credit budget around them.
 
-## What's here
+Everything here is **self-contained and near-zero-build**: a minimalist HTML slide deck you present
+from a browser, and one live demo that meters **your own** Copilot logs. No SaaS, no signup.
+
+---
+
+## TL;DR — what to do
+
+| You want to… | Do this |
+|---|---|
+| **Present the deck** | Open `docs/index.html` in a browser (← / → to navigate, `F` to present fullscreen). |
+| **Run the cost meter** | `cd demos/demo3-meter && python3 build_db.py && python3 export_dashboard.py && open dashboard.html` |
+| **Show the meter as a Copilot canvas** | Load `.github/extensions/finops-dashboard/` as an extension, then open the **FinOps cost dashboard** canvas. |
+| **Facilitate the room** | Read `docs/facilitator-guide.md`. |
+| **Understand the narrative** | Read `deck/deck-spec.md` (the why) and `deck/deck-mockups.md` (slide-by-slide). |
+
+---
+
+## Repository map
 
 | Path | What it is |
 |---|---|
-| `deck/deck-spec.md` | Authoritative deck synthesis — spine, 3 acts, 7 idea-slides + 3 demos, exact metered hook numbers, number discipline. |
-| `deck/deck-mockups.md` | Minimalist ASCII-art mockup of every slide (one kernel idea each) — the design source for the built slides. |
-| `deck/slides/` | Built slides (reuse + rebrand of a minimalist base deck). |
-| `demos/demo3-meter/` | **Demo 3 — MEASURE.** Reads the Copilot session logs you already produce and derives tokens → AI Units → credits → USD, plus a sessions-by-cost / skills-by-usage dashboard. |
-| `docs/research-brief.md` | Chief-researcher back-matter: grounding pointers, demo assets, exercise details. |
-| `docs/workshop-plan.md` | Prep & orchestration plan with checkpoints. |
-| `exercise/` | The 30-min live exercise (Review Panel / Static Agentic Workflow) + async lab pointers. |
+| `docs/` | The **built, presentable HTML deck** (`index.html` + `slides/`) — minimalist, 1280×720, offline. Plus `facilitator-guide.md`. |
+| `deck/deck-spec.md` | Deck **source of truth**: the spine, the 3 acts, idea-slides + 3 demos, the exact metered hook numbers, and number discipline. |
+| `deck/deck-mockups.md` | One minimalist ASCII mockup per slide — the design intent behind each built slide. |
+| `demos/demo3-meter/` | **Demo 3 — MEASURE.** A stdlib-only meter that turns the Copilot logs you already produce into tokens → AI Units → credits → USD, with sessions-by-cost and skills-by-usage rankings. |
+| `.github/extensions/finops-dashboard/` | A Copilot **canvas** wrapping the Demo 3 dashboard (renders the local snapshot; data stays local). |
+
+---
 
 ## The session at a glance
 
-`Hook(1) → Reframe(2) → Why-not-dev(3) + DEMO1 → Lifecycle loop(4) → Pools(5) → Tooling(6) + DEMO2 → Meter + DEMO3 → Playbook(7) → Exercise`
+```
+Hook(1) → Reframe(2) → Why-not-dev(3) +DEMO1 → Lifecycle loop(4)
+        → Pools(5) → Tooling(6) +DEMO2 → Meter +DEMO3 → Playbook(7) → Exercise
+```
 
 **The three demos**
-1. **DESIGN** — `genesis` designs a cost-aware agentic workflow (explore once at frontier cost → codify the cheap loop).
-2. **GOVERN** — `apm` + catalog: a governed, reusable workflow pinned by manifest + lockfile, gated by policy.
-3. **MEASURE** — the meter in `demos/demo3-meter/` reads your own logs. _"It's already in your logs. No new SaaS."_
+1. **DESIGN** — `genesis` designs a cost-aware agentic workflow: explore once at frontier cost, then codify the cheap, repeatable loop.
+2. **GOVERN** — `apm` (Agent Package Manager) + a central catalog: a governed, reusable workflow pinned by manifest + lockfile and gated by policy.
+3. **MEASURE** — the meter in `demos/demo3-meter/` reads **your own** logs. *“It’s already in your logs. No new SaaS.”*
 
-## Number discipline (honesty)
-Lead with the **metered** story: **7×** (same task, same model, loop-only) → **8.5×** (premium default that also failed)
-→ **10–50×** (naive fan-out). Treat "18×" only as the order-of-magnitude envelope, never as a single metered fact.
+**Tools shown:** GitHub Copilot App · GitHub Agentic Workflows · Agent Package Manager (`apm`).
 
-## Privacy
+---
+
+## Number discipline (be honest)
+
+Lead with the **metered**, replayable story, not a headline multiplier:
+
+| Same high-value task | Cost | vs. right-sized |
+|---|---|---|
+| Right-sized loop (explore once → cheap loop) | **$4.81** | 1× |
+| Same model, **bad loop** (re-explores every run) | **$33.79** | **7×** |
+| **Premium default** (Opus everywhere) — and it still **failed** | **$41.01** | **8.5×** |
+
+“18×” is only an **order-of-magnitude envelope** for naive fan-out — never present it as a single metered fact.
+The dashboard mirrors this discipline: session cost is **measured**; per-skill/tool cost is an explicit **estimate** (see below).
+
+---
+
+## Privacy — your telemetry stays local
+
 The meter reads your local `~/.copilot/logs` and `~/.copilot/session-state`. Generated artifacts
-(`finops.db`, `dashboard_data.json`) contain **your real session costs/usage** and are **gitignored** —
-they never get committed. Regenerate locally with the demo's build script.
+(`finops.db`, `dashboard_data.json`, `dashboard.html`, `EVIDENCE.md`) contain **your real session
+costs and usage** and are **gitignored** — they are never committed or pushed. Regenerate them locally
+with `build_db.py` + `export_dashboard.py`. The canvas extension renders only that local snapshot.
+
+---
 
 ## Credits
-Built on the *Agentic SDLC Bill* corpus (handbook ch. 7), a minimalist base deck, `genesis`, `apm`,
-and the `zava` agentic-SDLC workshop track.
+
+Built on the *Agentic SDLC Bill* corpus (handbook ch. 7), a minimalist base slide system,
+`genesis` (workflow design), `apm` (Agent Package Manager), and an agentic-SDLC workshop track.
