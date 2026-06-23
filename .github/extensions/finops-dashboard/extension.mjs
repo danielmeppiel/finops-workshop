@@ -104,7 +104,17 @@ function renderHtml(data) {
   .note { color:var(--text-color-muted,#8b949e); font-size:11.5px; margin-top:9px; }
   .note code { font-family: var(--font-mono, ui-monospace, Menlo, monospace); font-size:11px; }
   .empty { color:var(--text-color-muted,#8b949e); font-size:12.5px; padding:10px 2px; }
-  @media (max-width: 900px) { .cards { grid-template-columns: repeat(3,1fr); } }
+  .srow { cursor:pointer; }
+  .srow:hover { background: color-mix(in srgb, var(--bar) 12%, transparent); }
+  .ov { position:fixed; inset:0; background:rgba(1,4,9,.66); display:none; align-items:flex-start; justify-content:center; z-index:50; overflow:auto; padding:34px 16px; }
+  .ov.open { display:flex; }
+  .modal { background: var(--background-color-default,#0d1117); border:1px solid var(--border-color-default,#30363d); border-radius:14px; max-width:920px; width:100%; padding:18px 20px 22px; box-shadow:0 16px 50px rgba(1,4,9,.6); }
+  .modal h3 { margin:0 0 2px; font-size:17px; }
+  .modal .msub { color:var(--text-color-muted,#8b949e); font-size:11.5px; margin-bottom:12px; }
+  .modal h4 { margin:16px 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-color-muted,#8b949e); }
+  .mclose { float:right; cursor:pointer; border:1px solid var(--border-color-default,#30363d); background:var(--background-color-muted,#161b22); color:var(--text-color-default,#e6edf3); border-radius:8px; padding:4px 10px; font-size:12px; }
+  .mcards { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:6px 0 4px; }
+  @media (max-width: 900px) { .cards { grid-template-columns: repeat(3,1fr); } .mcards { grid-template-columns:repeat(2,1fr); } }
 </style>
 </head>
 <body>
@@ -146,6 +156,7 @@ function renderHtml(data) {
     <div class="note">Calls and sessions are measured from <code>tool</code> events. Point tools are not windowed, so no per-tool $ is shown. Filtered by date (and by the selected skill's sessions); the model filter does not apply to tools.</div>
   </section>
 </main>
+<div class="ov" id="ov"><div class="modal" id="modal"></div></div>
 <script>
   const data = ${json};
   const ST = data.sessions_tbl||[], FSM = data.facts_session_model||[], FSK = data.facts_skill||[], FT = data.facts_tool||[];
@@ -157,6 +168,7 @@ function renderHtml(data) {
   const esc = s => String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   const dayOf = i => { const r=ST[i]; return r?r[1]:''; };
   const sidOf = i => { const r=ST[i]; return r?r[0]:''; };
+  const titleOf = i => { const r=ST[i]; return (r&&r[2])?r[2]:''; };
   const tier = m => { m=m||''; return m.indexOf('opus')>=0?'premium':(m.indexOf('sonnet')>=0?'mid':'economy'); };
 
   const state = { from: data.date_min||'', to: data.date_max||'', model:'', skill:'' };
@@ -174,7 +186,7 @@ function renderHtml(data) {
     const sessions=Object.values(ss).sort((x,y)=>y.usd-x.usd);
     let totUsd=0,totCred=0,totTok=0,premUsd=0; for(const r of smRows){ totUsd+=r.usd||0; totCred+=r.cred||0; totTok+=r.t||0; if(tier(r.m)==='premium') premUsd+=r.usd||0; }
     const skRows=[]; for(const f of FSK){ if(inRange(f.s) && (!model||f.m===model) && (!skill||f.sk===skill)) skRows.push(f); }
-    const sk={}; for(const f of skRows){ const a=sk[f.sk]||(sk[f.sk]={skill:f.sk,calls:0,sessions:new Set(),o:0,usd:0,cred:0}); a.calls+=f.c||0;a.sessions.add(f.s);a.o+=f.o||0;a.usd+=f.usd||0;a.cred+=f.cred||0; }
+    const sk={}; for(const f of skRows){ const a=sk[f.sk]||(sk[f.sk]={skill:f.sk,calls:0,sessions:new Set(),o:0,i:0,cr:0,cw:0,usd:0,cred:0}); a.calls+=f.c||0;a.sessions.add(f.s);a.o+=f.o||0;a.i+=f.i||0;a.cr+=f.cr||0;a.cw+=f.cw||0;a.usd+=f.usd||0;a.cred+=f.cred||0; }
     const skills=Object.values(sk).sort((x,y)=>y.usd-x.usd);
     const skillTotUsd=skills.reduce((s,r)=>s+r.usd,0);
     const tlRows=[]; for(const f of FT){ if(inRange(f.s) && (!skillSessions||skillSessions.has(f.s))) tlRows.push(f); }
@@ -210,7 +222,8 @@ function renderHtml(data) {
     const s=c.sessions.slice(0,25); if(!s.length) return '<div class="empty">No sessions for this filter.</div>';
     const max=Math.max(...s.map(r=>r.usd||0),1);
     return '<table><thead><tr><th>Session</th><th>Date</th><th>Models</th><th class="num">USD</th><th class="num">Credits</th><th class="num">Tokens</th><th>Cost</th></tr></thead><tbody>'+
-      s.map(r=>'<tr><td class="sid" title="'+esc(sidOf(r.s))+'">'+esc(sidOf(r.s).slice(0,8))+'</td><td class="num dt">'+esc(dayOf(r.s)||'—')+'</td><td class="models">'+esc(Array.from(r.models).sort().join(', '))+'</td><td class="num">'+fmtMoney(r.usd)+'</td><td class="num">'+fmtCredits(r.cred)+'</td><td class="num">'+fmtTok(r.t)+'</td>'+bar(r.usd,max)+'</tr>').join('')+
+      s.map(r=>{ const ti=titleOf(r.s), sid=sidOf(r.s); const label=ti?esc(ti):esc(sid.slice(0,8));
+        return '<tr class="srow" data-s="'+r.s+'" title="'+esc(sid)+(ti?' · '+esc(ti):'')+'"><td><div class="name">'+label+'</div><div class="sid">'+esc(sid.slice(0,8))+' · click to inspect</div></td><td class="num dt">'+esc(dayOf(r.s)||'—')+'</td><td class="models">'+esc(Array.from(r.models).sort().join(', '))+'</td><td class="num">'+fmtMoney(r.usd)+'</td><td class="num">'+fmtCredits(r.cred)+'</td><td class="num">'+fmtTok(r.t)+'</td>'+bar(r.usd,max)+'</tr>'; }).join('')+
       '</tbody></table>';
   }
   function renderSkills(c){
@@ -218,9 +231,9 @@ function renderHtml(data) {
     const max=Math.max(...s.map(r=>r.usd||0),1);
     const top5=s.slice(0,5).reduce((a,r)=>a+r.usd,0);
     const conc = c.skillTotUsd ? top5/c.skillTotUsd : 0;
-    document.getElementById('skills-note').innerHTML='<b>Calls, sessions &amp; window output tokens are measured</b> from each <code>skill.invoked</code> until the next user turn. <b>Window $ (est)</b> apportions the metered session cost by that window\\'s share of output tokens (modeled). Top 5 skills = <b>'+fmtPct(conc)+'</b> of modeled skill $ — these are your <b>codify-the-loop</b> candidates.';
-    return '<table><thead><tr><th>Skill (loop)</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Window out tok</th><th class="num">Window $ (est)</th><th>Window cost</th></tr></thead><tbody>'+
-      s.map(r=>'<tr><td class="name">'+esc(r.skill)+'</td><td class="num">'+fmtInt(r.calls)+'</td><td class="num">'+fmtInt(r.sessions.size)+'</td><td class="num">'+fmtTok(r.o)+'</td><td class="num">'+fmtMoney(r.usd)+'</td>'+bar(r.usd,max,'')+'</tr>').join('')+
+    document.getElementById('skills-note').innerHTML='<b>Calls, sessions &amp; window output are measured</b> from each <code>skill.invoked</code> until the next skill, the next HUMAN turn, or session end (synthetic skill-context messages no longer truncate the window; a new skill overtakes the prior one, so windows do not overlap). <b>Input / cache / $ (est)</b> apportion the metered session cost by that window\\'s output share (modeled, reconciles to metered). Top 5 skills = <b>'+fmtPct(conc)+'</b> of modeled skill $ — your <b>codify-the-loop</b> candidates.';
+    return '<table><thead><tr><th>Skill (loop)</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Win input</th><th class="num">Win cache rd</th><th class="num">Win output</th><th class="num">Window $ (est)</th><th>Window cost</th></tr></thead><tbody>'+
+      s.map(r=>'<tr><td class="name">'+esc(r.skill)+'</td><td class="num">'+fmtInt(r.calls)+'</td><td class="num">'+fmtInt(r.sessions.size)+'</td><td class="num">'+fmtTok(r.i)+'</td><td class="num">'+fmtTok(r.cr)+'</td><td class="num">'+fmtTok(r.o)+'</td><td class="num">'+fmtMoney(r.usd)+'</td>'+bar(r.usd,max,'')+'</tr>').join('')+
       '</tbody></table>';
   }
   function renderTools(c){
@@ -231,6 +244,45 @@ function renderHtml(data) {
       '</tbody></table>';
   }
 
+  function openInspector(s){
+    const sid=sidOf(s), ti=titleOf(s), day=dayOf(s);
+    const sm=FSM.filter(r=>r.s===s).slice().sort((a,b)=>(b.usd||0)-(a.usd||0));
+    const fk=FSK.filter(r=>r.s===s).slice().sort((a,b)=>(b.usd||0)-(a.usd||0));
+    const ft=FT.filter(r=>r.s===s).slice().sort((a,b)=>(b.c||0)-(a.c||0));
+    let tUsd=0,tCred=0,tTok=0,tReq=0; for(const r of sm){ tUsd+=r.usd||0; tCred+=r.cred||0; tTok+=r.t||0; tReq+=r.rq||0; }
+    let h='<button class="mclose" id="mclose">Close ✕</button>';
+    h+='<h3>'+(ti?esc(ti):esc(sid.slice(0,8)))+'</h3>';
+    h+='<div class="msub">'+esc(sid)+' · '+esc(day||'—')+'</div>';
+    h+='<div class="mcards">'+
+      '<div class="card"><div class="label">Metered $</div><div class="value">'+fmtMoney(tUsd)+'</div></div>'+
+      '<div class="card"><div class="label">Credits</div><div class="value">'+fmtCredits(tCred)+'</div></div>'+
+      '<div class="card"><div class="label">Tokens</div><div class="value">'+fmtTok(tTok)+'</div></div>'+
+      '<div class="card"><div class="label">Requests</div><div class="value">'+fmtInt(tReq)+'</div></div>'+
+      '</div>';
+    h+='<h4>Per-model (metered)</h4>';
+    if(sm.length){
+      h+='<table><thead><tr><th>Model</th><th class="num">Req</th><th class="num">Input</th><th class="num">Cache rd</th><th class="num">Cache wr</th><th class="num">Output</th><th class="num">USD</th><th class="num">Credits</th></tr></thead><tbody>';
+      for(const r of sm){ h+='<tr><td class="name">'+esc(r.m)+'</td><td class="num">'+fmtInt(r.rq)+'</td><td class="num">'+fmtTok(r.i)+'</td><td class="num">'+fmtTok(r.cr)+'</td><td class="num">'+fmtTok(r.cw)+'</td><td class="num">'+fmtTok(r.o)+'</td><td class="num">'+fmtMoney(r.usd)+'</td><td class="num">'+fmtCredits(r.cred)+'</td></tr>'; }
+      h+='</tbody></table>';
+    } else { h+='<div class="empty">No metered model rows.</div>'; }
+    h+='<h4>Skill windows <span class="tag m">output measured</span> <span class="tag e">input/cache/$ modeled</span></h4>';
+    if(fk.length){
+      h+='<table><thead><tr><th>Skill</th><th>Model</th><th class="num">Calls</th><th class="num">Output</th><th class="num">Input</th><th class="num">Cache rd</th><th class="num">$ est</th></tr></thead><tbody>';
+      for(const r of fk){ h+='<tr><td class="name">'+esc(r.sk)+'</td><td class="models">'+esc(r.m)+'</td><td class="num">'+fmtInt(r.c)+'</td><td class="num">'+fmtTok(r.o)+'</td><td class="num">'+fmtTok(r.i)+'</td><td class="num">'+fmtTok(r.cr)+'</td><td class="num">'+fmtMoney(r.usd)+'</td></tr>'; }
+      h+='</tbody></table>';
+    } else { h+='<div class="empty">No skill windows in this session.</div>'; }
+    h+='<h4>Tools</h4>';
+    if(ft.length){
+      h+='<table><thead><tr><th>Tool</th><th class="num">Calls</th></tr></thead><tbody>';
+      for(const r of ft.slice(0,40)){ h+='<tr><td class="name">'+esc(r.tl)+'</td><td class="num">'+fmtInt(r.c)+'</td></tr>'; }
+      h+='</tbody></table>';
+    } else { h+='<div class="empty">No tool calls in this session.</div>'; }
+    document.getElementById('modal').innerHTML=h;
+    document.getElementById('ov').classList.add('open');
+    document.getElementById('mclose').addEventListener('click',closeInspector);
+  }
+  function closeInspector(){ document.getElementById('ov').classList.remove('open'); }
+
   function renderAll(){
     const c=compute();
     document.getElementById('cards').innerHTML=renderCards(c);
@@ -238,6 +290,7 @@ function renderHtml(data) {
     document.getElementById('sessions').innerHTML=renderSessions(c);
     document.getElementById('skills').innerHTML=renderSkills(c);
     document.getElementById('tools').innerHTML=renderTools(c);
+    const rows=document.querySelectorAll('#sessions .srow'); for(const el of rows){ el.addEventListener('click',()=>openInspector(parseInt(el.getAttribute('data-s'),10))); }
     const flt=[]; if(state.model) flt.push('model='+state.model); if(state.skill) flt.push('skill='+state.skill);
     document.getElementById('frange').textContent=(state.from||'…')+' → '+(state.to||'…')+(flt.length?'  ·  '+flt.join('  ·  '):'')+'  ·  '+fmtInt(c.sessCount)+' sessions';
   }
@@ -254,6 +307,8 @@ function renderHtml(data) {
     mo.addEventListener('change',e=>{ state.model=e.target.value; renderAll(); });
     sk.addEventListener('change',e=>{ state.skill=e.target.value; renderAll(); });
     document.getElementById('f-reset').addEventListener('click',()=>{ state.from=data.date_min||''; state.to=data.date_max||''; state.model=''; state.skill=''; ff.value=state.from; ft.value=state.to; mo.value=''; sk.value=''; renderAll(); });
+    document.getElementById('ov').addEventListener('click',e=>{ if(e.target.id==='ov') closeInspector(); });
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeInspector(); });
   }
   initControls();
   renderAll();

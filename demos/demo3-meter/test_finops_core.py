@@ -98,7 +98,10 @@ class FinopsCoreTests(unittest.TestCase):
         self.assertAlmostEqual(result["bash"]["usd"], 1.5)
         self.assertAlmostEqual(result["skill:pdf"]["tokens_total"], 25.0)
 
-    def test_skill_windows_are_non_overlapping_and_leave_prefix_unattributed(self):
+    def test_skill_windows_close_on_next_skill_or_human_turn_no_overlap(self):
+        # Semantics: a window closes at the EARLIEST of the next skill.invoked, the
+        # next human user.message, or session end. A new skill OVERTAKES the prior
+        # one, so windows do NOT overlap and never share output.
         events = [
             {"type": "user.message", "timestamp": "2026-01-01T00:00:00.000Z", "data": {}},
             {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 11}},
@@ -123,6 +126,9 @@ class FinopsCoreTests(unittest.TestCase):
 
         windows = fc.compute_skill_windows(events, session)
 
+        # pdf spans [00:02, 00:05) and captures 7+3 = 10 (closed by the next skill);
+        # workiq spans [00:05, 00:07) and captures 5 (closed by the human turn).
+        # The prefix (11) and suffix (13) stay unattributed. No shared output.
         self.assertEqual(
             [(w["skill_name"], w["window_start_time"], w["window_end_time"], w["model"], w["window_output_tokens"]) for w in windows],
             [
@@ -130,8 +136,97 @@ class FinopsCoreTests(unittest.TestCase):
                 ("workiq", "2026-01-01T00:00:05.000Z", "2026-01-01T00:00:07.000Z", "claude-opus-4-8", 5),
             ],
         )
+        # Non-overlapping, so sum window output 10+5=15 <= metered 20; D = 20.
         self.assertAlmostEqual(windows[0]["window_usd_est"], 1.0)
         self.assertAlmostEqual(windows[1]["window_usd_est"], 0.5)
+
+    def test_back_to_back_skills_second_overtakes_first(self):
+        # The first skill is immediately overtaken by the second (e.g. it loaded it)
+        # with no assistant output in between, so its window is empty by design and
+        # the second skill captures the work. Output stays MEASURED (no overlap).
+        events = [
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:00.000Z", "data": {}},
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"name": "brainstorming"}},
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:02.000Z", "data": {"name": "writing-plans"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:03.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 42}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:04.000Z", "data": {}},
+        ]
+        session = {"models": [{"model": "claude-opus-4.8", "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 42}, "usd": 1.0, "credits": 100.0}]}
+
+        windows = fc.compute_skill_windows(events, session)
+
+        by_skill = {w["skill_name"]: w for w in windows}
+        self.assertEqual(by_skill["brainstorming"]["window_output_tokens"], 0)
+        self.assertEqual(by_skill["writing-plans"]["window_output_tokens"], 42)
+
+
+    def test_synthetic_skill_context_user_message_does_not_close_window(self):
+        # CASE B regression (the bigger bucket): the skill-context injection is a
+        # synthetic user.message with source="skill-<name>". It must NOT close the
+        # window; the OLD code closed on it, truncating the window to 0 output.
+        events = [
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:00.000Z", "data": {}},
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"name": "pr-description-skill"}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"source": "skill-pr-description-skill", "content": "<skill-context name=\"pr-description-skill\">"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:02.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 30}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:03.000Z", "data": {}},
+        ]
+        session = {"models": [{"model": "claude-opus-4.8", "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 30}, "usd": 1.0, "credits": 100.0}]}
+
+        windows = fc.compute_skill_windows(events, session)
+
+        self.assertEqual(len(windows), 1)
+        self.assertEqual(windows[0]["skill_name"], "pr-description-skill")
+        self.assertEqual(windows[0]["window_output_tokens"], 30)
+        self.assertEqual(windows[0]["window_end_time"], "2026-01-01T00:00:03.000Z")
+
+    def test_window_full_token_breakdown_apportioned_from_metered_pool(self):
+        # input/cache aren't in events; they are apportioned from the metered pool
+        # by the window's output share (here the window owns 100% of the output).
+        events = [
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:00.000Z", "data": {"name": "workiq"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 50}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:02.000Z", "data": {}},
+        ]
+        session = {"models": [{"model": "claude-opus-4.8", "tokens": {"input": 200, "cache_read": 400, "cache_write": 80, "output": 100}, "usd": 4.0, "credits": 400.0}]}
+
+        windows = fc.compute_skill_windows(events, session)
+
+        w = windows[0]
+        self.assertEqual(w["window_output_tokens"], 50)  # MEASURED
+        self.assertEqual(w["denominator_output_tokens"], 100)
+        # share = 50/100 = 0.5 -> apportioned from metered pool
+        self.assertEqual(w["window_input_tokens"], 100)
+        self.assertEqual(w["window_cache_read_tokens"], 200)
+        self.assertEqual(w["window_cache_write_tokens"], 40)
+        self.assertAlmostEqual(w["window_usd_est"], 2.0)
+        self.assertAlmostEqual(w["window_credits_est"], 200.0)
+
+    def test_subagent_other_model_output_counted_inside_window(self):
+        # A subagent turn on a DIFFERENT model inside the window must be captured
+        # under its own model (events tag each assistant.message with data.model).
+        events = [
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:00.000Z", "data": {"name": "dispatching-parallel-agents"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 40}},
+            {"type": "subagent.started", "timestamp": "2026-01-01T00:00:02.000Z", "data": {"agentName": "explore"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:03.000Z", "data": {"model": "gpt-5.5", "outputTokens": 60}},
+            {"type": "subagent.completed", "timestamp": "2026-01-01T00:00:04.000Z", "data": {"agentName": "explore"}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:05.000Z", "data": {}},
+        ]
+        session = {
+            "models": [
+                {"model": "claude-opus-4.8", "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 40}, "usd": 3.0, "credits": 300.0},
+                {"model": "gpt-5.5", "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 60}, "usd": 0.6, "credits": 60.0},
+            ]
+        }
+
+        windows = fc.compute_skill_windows(events, session)
+
+        by_model = {w["model"]: w for w in windows}
+        self.assertEqual(by_model["claude-opus-4-8"]["window_output_tokens"], 40)
+        self.assertEqual(by_model["gpt-5-5"]["window_output_tokens"], 60)
+        self.assertAlmostEqual(by_model["claude-opus-4-8"]["window_usd_est"], 3.0)
+        self.assertAlmostEqual(by_model["gpt-5-5"]["window_usd_est"], 0.6)
 
     def test_skill_windows_apportion_each_model_from_metered_model_pool(self):
         events = [
@@ -167,7 +262,10 @@ class FinopsCoreTests(unittest.TestCase):
         self.assertEqual(by_model["claude-sonnet-4-6"]["denominator_output_tokens"], 120)
         self.assertAlmostEqual(by_model["claude-sonnet-4-6"]["window_usd_est"], 6.0)
 
-    def test_skill_window_usd_is_not_modeled_when_measured_output_exceeds_metered_pool(self):
+    def test_skill_window_usd_caps_at_metered_pool_when_measured_output_exceeds(self):
+        # When measured window output exceeds the metered pool, the overlap-safe
+        # denominator D = max(metered, sum window output) caps the share at 1.0, so
+        # the window receives the FULL metered model cost (never more).
         events = [
             {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:00.000Z", "data": {"name": "workiq"}},
             {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 15}},
@@ -187,8 +285,8 @@ class FinopsCoreTests(unittest.TestCase):
         windows = fc.compute_skill_windows(events, session)
 
         self.assertEqual(windows[0]["window_output_tokens"], 15)
-        self.assertEqual(windows[0]["denominator_output_tokens"], 10)
-        self.assertAlmostEqual(windows[0]["window_usd_est"], 0.0)
+        self.assertEqual(windows[0]["denominator_output_tokens"], 15)
+        self.assertAlmostEqual(windows[0]["window_usd_est"], 1.0)
 
     def test_skill_window_uses_sole_session_model_when_message_model_is_missing(self):
         events = [

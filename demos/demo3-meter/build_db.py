@@ -93,6 +93,9 @@ def init_db(conn: sqlite3.Connection) -> None:
             window_start_time TEXT,
             window_end_time TEXT,
             window_output_tokens INTEGER NOT NULL DEFAULT 0,
+            window_input_tokens INTEGER NOT NULL DEFAULT 0,
+            window_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+            window_cache_write_tokens INTEGER NOT NULL DEFAULT 0,
             denominator_output_tokens INTEGER NOT NULL DEFAULT 0,
             model_session_usd REAL NOT NULL DEFAULT 0,
             window_usd_est REAL NOT NULL DEFAULT 0,
@@ -167,9 +170,10 @@ def upsert_session(conn: sqlite3.Connection, session: dict) -> None:
             """
             INSERT OR REPLACE INTO session_skill_windows (
                 session_id, window_index, skill_name, model, window_start_time, window_end_time,
-                window_output_tokens, denominator_output_tokens, model_session_usd, window_usd_est,
+                window_output_tokens, window_input_tokens, window_cache_read_tokens, window_cache_write_tokens,
+                denominator_output_tokens, model_session_usd, window_usd_est,
                 window_credits_est, invocation_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session["session_id"],
@@ -179,6 +183,9 @@ def upsert_session(conn: sqlite3.Connection, session: dict) -> None:
                 window.get("window_start_time"),
                 window.get("window_end_time"),
                 window.get("window_output_tokens") or 0,
+                window.get("window_input_tokens") or 0,
+                window.get("window_cache_read_tokens") or 0,
+                window.get("window_cache_write_tokens") or 0,
                 window.get("denominator_output_tokens") or 0,
                 window.get("model_session_usd") or 0.0,
                 window.get("window_usd_est") or 0.0,
@@ -247,7 +254,7 @@ def main() -> int:
         "raw_log_parse_errors": parse_errors,
         "credit_usd": fc.CREDIT_USD,
         "tool_attribution_method": "Tools keep measured invocation counts and distinct sessions; dashboard dollars are metered session cost where the tool ran, not per-tool attribution.",
-        "skill_window_method": "Skill windows start at skill.invoked and end at the next user.message or next skill.invoked. window_output_tokens are measured assistant.message outputTokens; window_usd_est is modeled by output-token-share apportionment of metered per-model session USD when measured window output fits the metered model pool.",
+        "skill_window_method": "Skill windows open at skill.invoked and close at the EARLIEST of the next skill.invoked, the next HUMAN user.message (source absent or 'user'; synthetic skill-context/autopilot messages are ignored), or session end. A new skill overtakes the prior one, so windows do NOT overlap. window_output_tokens are MEASURED assistant.message outputTokens summed per model (including subagent turns on other models that do not themselves emit a skill.invoked). window_input/cache_read/cache_write_tokens, window_usd_est and window_credits_est are MODELED: each model's metered session totals apportioned by the window's output share, with denominator max(metered_output, sum_window_output) as a safety cap.",
     }
     for key, value in meta.items():
         conn.execute("INSERT OR REPLACE INTO etl_metadata (key, value) VALUES (?, ?)", (key, json.dumps(value)))

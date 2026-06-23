@@ -11,11 +11,48 @@ WORK = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(WORK, "finops.db")
 JSON_PATH = os.path.join(WORK, "dashboard_data.json")
 HTML_PATH = os.path.join(WORK, "dashboard.html")
+COPILOT_HOME = os.path.expanduser(os.environ.get("COPILOT_HOME", "~/.copilot"))
+SESSION_STORE_DB = os.path.join(COPILOT_HOME, "session-store.db")
+DATA_DB = os.path.join(COPILOT_HOME, "data.db")
 
 
 def rows(conn, sql, params=()):
     conn.row_factory = sqlite3.Row
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def _clean_title(val, limit=64):
+    """Collapse whitespace and clip an over-long session summary to one tidy line.
+
+    Some sessions store the entire first user message as their `summary` (a raw
+    multi-line prompt rather than a curated title). Displaying that verbatim
+    blows up table rows and can surface unrelated content in a live demo, so we
+    flatten to a single line and clip to `limit` chars with an ellipsis.
+    """
+    s = " ".join(str(val).split())
+    return s if len(s) <= limit else s[: limit - 1].rstrip() + "\u2026"
+
+
+def load_titles():
+    """Best-available human title per session id (LOCAL telemetry, never committed).
+
+    Precedence: session-store.db `sessions.summary` (curated title) >
+    data.db `sessions.title` (first-message title) > short hash (added later in JS).
+    """
+    titles = {}
+    # Lower precedence first so higher precedence overwrites.
+    for path, table, col in ((DATA_DB, "sessions", "title"), (SESSION_STORE_DB, "sessions", "summary")):
+        if not os.path.exists(path):
+            continue
+        try:
+            conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+            for sid, val in conn.execute(f"SELECT id, {col} FROM {table}"):
+                if val and str(val).strip():
+                    titles[sid] = _clean_title(val)
+            conn.close()
+        except sqlite3.Error:
+            continue
+    return titles
 
 
 def main() -> int:
@@ -78,6 +115,9 @@ def main() -> int:
         window_costs AS (
             SELECT skill_name,
                    SUM(window_output_tokens) AS window_output_tokens,
+                   SUM(window_input_tokens) AS window_input_tokens,
+                   SUM(window_cache_read_tokens) AS window_cache_read_tokens,
+                   SUM(window_cache_write_tokens) AS window_cache_write_tokens,
                    SUM(window_usd_est) AS window_usd_est,
                    SUM(window_credits_est) AS window_credits_est
             FROM session_skill_windows
@@ -87,6 +127,9 @@ def main() -> int:
                sc.invocation_count,
                sc.sessions,
                COALESCE(wc.window_output_tokens, 0) AS window_output_tokens,
+               COALESCE(wc.window_input_tokens, 0) AS window_input_tokens,
+               COALESCE(wc.window_cache_read_tokens, 0) AS window_cache_read_tokens,
+               COALESCE(wc.window_cache_write_tokens, 0) AS window_cache_write_tokens,
                COALESCE(wc.window_usd_est, 0) AS window_usd_est,
                COALESCE(wc.window_credits_est, 0) AS window_credits_est
         FROM skill_counts sc
@@ -118,13 +161,16 @@ def main() -> int:
         WHERE se.start_time IS NOT NULL AND se.start_time <> ''
         """,
     )
-    # Per (skill, session, model) windowed rows: output tokens MEASURED, usd MODELED.
+    # Per (skill, session, model) windowed rows: output tokens MEASURED, input/cache
+    # and usd MODELED (apportioned from the metered model pool by output share).
     facts_skill = rows(
         conn,
         """
         SELECT w.skill_name AS sk, w.session_id AS s, SUBSTR(se.start_time, 1, 10) AS d, w.model AS m,
-               SUM(w.window_output_tokens) AS o, SUM(w.window_usd_est) AS usd,
-               SUM(w.window_credits_est) AS cred, SUM(w.invocation_count) AS c
+               SUM(w.window_output_tokens) AS o, SUM(w.window_input_tokens) AS i,
+               SUM(w.window_cache_read_tokens) AS cr, SUM(w.window_cache_write_tokens) AS cw,
+               SUM(w.window_usd_est) AS usd, SUM(w.window_credits_est) AS cred,
+               SUM(w.invocation_count) AS c
         FROM session_skill_windows w
         JOIN sessions se ON se.session_id = w.session_id
         WHERE se.start_time IS NOT NULL AND se.start_time <> ''
@@ -150,10 +196,12 @@ def main() -> int:
         conn,
         "SELECT MIN(SUBSTR(start_time,1,10)) AS lo, MAX(SUBSTR(start_time,1,10)) AS hi FROM sessions WHERE start_time IS NOT NULL AND start_time <> ''",
     )[0]
+    titles = load_titles()
     conn.close()
 
-    # Intern session ids -> integer index, with a parallel [id, day] table, so the
-    # 36-char UUID and the date are stored once instead of on every fact row.
+    # Intern session ids -> integer index, with a parallel [id, day, title] table,
+    # so the 36-char UUID, the date, and the human title are stored once instead of
+    # on every fact row. The title is the curated session summary (local only).
     sessions_tbl = []
     sid_index = {}
 
@@ -162,7 +210,7 @@ def main() -> int:
         if idx is None:
             idx = len(sessions_tbl)
             sid_index[sid] = idx
-            sessions_tbl.append([sid, day])
+            sessions_tbl.append([sid, day, titles.get(sid, "")])
         return idx
 
     for r in facts_session_model:
@@ -171,9 +219,11 @@ def main() -> int:
         r["s"] = intern(r["s"], r.pop("d"))
     for r in facts_tool:
         r["s"] = intern(r["s"], r.pop("d"))
+    for r in top_sessions:
+        r["title"] = titles.get(r.get("session_id"), "")
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "method_note": "Session/model dollars are METERED; skill window_output_tokens are MEASURED; window_usd_est is MODELED by output-token apportionment of metered session cost when the measured window output fits the metered model pool; tools are ranked by usage.",
+        "method_note": "Session/model dollars are METERED. Skill window_output_tokens are MEASURED (assistant output while the skill is in context, summed per model incl. subagents on other models). Windows open at skill.invoked and close at the next HUMAN turn or session end (never at the next skill.invoked), so they may overlap. window_input/cache/usd/credits are MODELED: metered per-model session totals apportioned by the window's output share, denominator max(metered_output, sum_window_output) so the parts never exceed the metered whole. Tools are ranked by usage.",
         "summary": summary,
         "per_model": per_model,
         "top_sessions": top_sessions,
@@ -248,7 +298,7 @@ document.getElementById('cards').innerHTML = cards.map(([l,v]) => `<div class=ca
 function renderSessions() {{
  const max = Math.max(...data.top_sessions.map(r => r.usd||0), 1);
  return `<table><thead><tr><th>Session</th><th>Date</th><th>Model(s)</th><th class=num>Credits</th><th class=num>USD</th><th class=num>Tokens</th><th class=num>AIU</th><th>Cost bar</th></tr></thead><tbody>` +
- data.top_sessions.map(r => `<tr><td class=sid title="${{r.session_id}}">${{short(r.session_id)}}</td><td>${{r.start_date||'—'}}</td><td>${{r.models||'—'}}</td><td class=num>${{fmtCredits(r.credits)}}</td><td class=num>${{fmtMoney(r.usd)}}</td><td class=num>${{fmtInt(r.total_tokens)}}</td><td class=num>${{r.aiu==null?'—':Number(r.aiu).toFixed(3)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.usd||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
+ data.top_sessions.map(r => `<tr><td title="${{r.session_id}}">${{r.title?r.title:short(r.session_id)}}<div class=sid>${{short(r.session_id)}}</div></td><td>${{r.start_date||'—'}}</td><td>${{r.models||'—'}}</td><td class=num>${{fmtCredits(r.credits)}}</td><td class=num>${{fmtMoney(r.usd)}}</td><td class=num>${{fmtInt(r.total_tokens)}}</td><td class=num>${{r.aiu==null?'—':Number(r.aiu).toFixed(3)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.usd||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
 }}
 function renderModels() {{
  if (!data.per_model || !data.per_model.length) return '<div class=note>No metered model rows recorded.</div>';
@@ -258,8 +308,8 @@ function renderModels() {{
 function renderSkills() {{
  if (!data.top_skills || !data.top_skills.length) return '<div class=note>No skill invocations recorded.</div>';
  const max = Math.max(...data.top_skills.map(r => r.window_usd_est||0), 1);
- return `<table><thead><tr><th>Skill</th><th class=num>Calls</th><th class=num>Sessions</th><th class=num>Window output tokens</th><th class=num>Window credits est.</th><th class=num>Window USD est.</th><th>Est. cost bar</th></tr></thead><tbody>` +
- data.top_skills.map(r => `<tr><td>${{r.skill_name}}</td><td class=num>${{fmtInt(r.invocation_count)}}</td><td class=num>${{fmtInt(r.sessions)}}</td><td class=num>${{fmtInt(r.window_output_tokens)}}</td><td class=num>${{fmtCredits(r.window_credits_est)}}</td><td class=num>${{fmtMoney(r.window_usd_est)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.window_usd_est||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
+ return `<table><thead><tr><th>Skill</th><th class=num>Calls</th><th class=num>Sessions</th><th class=num>Win input</th><th class=num>Win cache rd</th><th class=num>Win output</th><th class=num>Window USD est.</th><th>Est. cost bar</th></tr></thead><tbody>` +
+ data.top_skills.map(r => `<tr><td>${{r.skill_name}}</td><td class=num>${{fmtInt(r.invocation_count)}}</td><td class=num>${{fmtInt(r.sessions)}}</td><td class=num>${{fmtInt(r.window_input_tokens)}}</td><td class=num>${{fmtInt(r.window_cache_read_tokens)}}</td><td class=num>${{fmtInt(r.window_output_tokens)}}</td><td class=num>${{fmtMoney(r.window_usd_est)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.window_usd_est||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
 }}
 function renderTools() {{
  const max = Math.max(...data.top_tools.map(r => r.invocation_count||0), 1);
