@@ -1,5 +1,7 @@
 window.SLIDES = [
   { id: "cover", type: "hero", title: "The Agentic SDLC Bill" },
+  { id: "intro", type: "authored", title: "Daniel Meppiel — Microsoft" },
+  { id: "book", type: "authored", title: "The Agentic SDLC Handbook" },
   { id: "s01-number", type: "content", title: "The Number" },
   { id: "s02-reframe", type: "content", title: "The Reframe" },
   { id: "s03-why-not-dev", type: "content", title: "Why Not the Developer" },
@@ -10,5 +12,6 @@ window.SLIDES = [
   { id: "s08-demo-govern", type: "demo", title: "Demo 2 · Govern" },
   { id: "s09-demo-measure", type: "demo", title: "Demo 3 · Measure" },
   { id: "s10-playbook", type: "content", title: "Monday Playbook" },
-  { id: "s11-exercise", type: "content", title: "Exercise" }
+  { id: "s11-exercise", type: "content", title: "Exercise" },
+  { id: "resources", type: "authored", title: "Resources" }
 ];
