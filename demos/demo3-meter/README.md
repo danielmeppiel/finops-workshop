@@ -63,8 +63,23 @@ so you can rank skill usage separately.
   "top_sessions": [{"session_id": "...", "start_date": "YYYY-MM-DD", "models": "...", "total_tokens": 0, "aiu": null, "usd": 0.0, "credits": 0.0}],
   "top_skills": [{"skill_name": "...", "invocation_count": 0, "sessions": 0, "window_output_tokens": 0, "window_usd_est": 0.0, "window_credits_est": 0.0}],
   "top_tools":  [{"tool_name": "...",  "invocation_count": 0, "sessions": 0, "session_usd_touched": 0.0, "session_credits_touched": 0.0}],
+
+  "date_min": "YYYY-MM-DD", "date_max": "YYYY-MM-DD",
+  "models": ["..."], "skills": ["..."],
+  "sessions_tbl": [["<session_id>", "YYYY-MM-DD"]],
+  "facts_session_model": [{"s": 0, "m": "...", "i": 0, "cr": 0, "cw": 0, "o": 0, "t": 0, "rq": 0, "usd": 0.0, "cred": 0.0, "aiu": null}],
+  "facts_skill": [{"sk": "...", "s": 0, "m": "...", "o": 0, "usd": 0.0, "cred": 0.0, "c": 0}],
+  "facts_tool": [{"tl": "...", "s": 0, "c": 0}]
 }
 ```
+
+The `top_*` blocks are the convenience all-time view. The `facts_*` arrays are the
+granular, INTERNED rows that power client-side filtering: `s` is an index into
+`sessions_tbl` (which holds the session id and its calendar day, stored once), `m`
+is the model, `sk`/`tl` the skill/tool. The canvas filters by date / model / skill
+and re-aggregates these facts in the browser — so a clone with no server can still
+slice the data (and filter state is shareable via `?from=&to=&model=&skill=` URL
+params).
 
 For tools, `session_usd_touched` = `SUM(session.usd)` over the distinct sessions where that tool appeared.
 It is a **metered** number (real session cost), but it is **not** cost caused by the tool.
@@ -77,8 +92,14 @@ skills fire before the user can interact again.
 
 ## Canvas handoff
 
-`dashboard.html` is self-contained (no network deps) and can be wrapped directly as a Copilot canvas,
-or a live-refresh canvas can render `top_sessions`, `top_skills` and `top_tools` from `dashboard_data.json`.
+`dashboard.html` is self-contained (no network deps) and can be wrapped directly as a Copilot canvas.
+The shipped canvas (`.github/extensions/finops-dashboard`) goes further: it serves the page from a
+loopback server and renders an **interactive, filterable** view — from/to date, model, and skill (loop)
+filters that recompute cost-by-model, top sessions, windowed skills, and tools entirely client-side from
+the `facts_*` arrays. It also surfaces operating-model KPIs (avg $/session, premium-tier $ share,
+top-5-skill concentration) that map directly to the workshop plays: **tier models**, **pool the spend**,
+and **codify the top loops**. Tools are shown by usage only (no per-tool $). Filter state is shareable
+via `?from=&to=&model=&skill=` URL params.
 
 ## Honest limitation (read this before quoting any number)
 

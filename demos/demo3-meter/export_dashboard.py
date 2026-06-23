@@ -103,7 +103,74 @@ def main() -> int:
         FROM sessions
         """,
     )[0]
+
+    # ---- Granular facts for client-side filtering (date / model / skill) ----
+    # Per (session, model) metered rows, tagged with the session's calendar day.
+    facts_session_model = rows(
+        conn,
+        """
+        SELECT sm.session_id AS s, SUBSTR(se.start_time, 1, 10) AS d, sm.model AS m,
+               sm.input_tokens AS i, sm.cache_read_tokens AS cr, sm.cache_write_tokens AS cw,
+               sm.output_tokens AS o, sm.total_tokens AS t, sm.responses AS rq,
+               sm.usd AS usd, sm.credits AS cred, sm.aiu AS aiu
+        FROM session_models sm
+        JOIN sessions se ON se.session_id = sm.session_id
+        WHERE se.start_time IS NOT NULL AND se.start_time <> ''
+        """,
+    )
+    # Per (skill, session, model) windowed rows: output tokens MEASURED, usd MODELED.
+    facts_skill = rows(
+        conn,
+        """
+        SELECT w.skill_name AS sk, w.session_id AS s, SUBSTR(se.start_time, 1, 10) AS d, w.model AS m,
+               SUM(w.window_output_tokens) AS o, SUM(w.window_usd_est) AS usd,
+               SUM(w.window_credits_est) AS cred, SUM(w.invocation_count) AS c
+        FROM session_skill_windows w
+        JOIN sessions se ON se.session_id = w.session_id
+        WHERE se.start_time IS NOT NULL AND se.start_time <> ''
+        GROUP BY w.skill_name, w.session_id, SUBSTR(se.start_time, 1, 10), w.model
+        """,
+    )
+    # Per (tool, session) rows: usage only (point tools are not windowed, no $).
+    facts_tool = rows(
+        conn,
+        """
+        SELECT st.tool_name AS tl, st.session_id AS s, SUBSTR(se.start_time, 1, 10) AS d,
+               SUM(st.invocation_count) AS c
+        FROM session_tools st
+        JOIN sessions se ON se.session_id = st.session_id
+        WHERE st.tool_name NOT LIKE 'skill:%'
+          AND se.start_time IS NOT NULL AND se.start_time <> ''
+        GROUP BY st.tool_name, st.session_id, SUBSTR(se.start_time, 1, 10)
+        """,
+    )
+    models_list = [r["model"] for r in rows(conn, "SELECT DISTINCT model FROM session_models ORDER BY model")]
+    skills_list = [r["sk"] for r in rows(conn, "SELECT DISTINCT skill_name AS sk FROM session_skill_windows ORDER BY skill_name")]
+    daterange = rows(
+        conn,
+        "SELECT MIN(SUBSTR(start_time,1,10)) AS lo, MAX(SUBSTR(start_time,1,10)) AS hi FROM sessions WHERE start_time IS NOT NULL AND start_time <> ''",
+    )[0]
     conn.close()
+
+    # Intern session ids -> integer index, with a parallel [id, day] table, so the
+    # 36-char UUID and the date are stored once instead of on every fact row.
+    sessions_tbl = []
+    sid_index = {}
+
+    def intern(sid, day):
+        idx = sid_index.get(sid)
+        if idx is None:
+            idx = len(sessions_tbl)
+            sid_index[sid] = idx
+            sessions_tbl.append([sid, day])
+        return idx
+
+    for r in facts_session_model:
+        r["s"] = intern(r["s"], r.pop("d"))
+    for r in facts_skill:
+        r["s"] = intern(r["s"], r.pop("d"))
+    for r in facts_tool:
+        r["s"] = intern(r["s"], r.pop("d"))
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "method_note": "Session/model dollars are METERED; skill window_output_tokens are MEASURED; window_usd_est is MODELED by output-token apportionment of metered session cost when the measured window output fits the metered model pool; tools are ranked by usage.",
@@ -112,6 +179,14 @@ def main() -> int:
         "top_sessions": top_sessions,
         "top_skills": top_skills,
         "top_tools": top_tools,
+        "date_min": daterange.get("lo"),
+        "date_max": daterange.get("hi"),
+        "models": models_list,
+        "skills": skills_list,
+        "sessions_tbl": sessions_tbl,
+        "facts_session_model": facts_session_model,
+        "facts_skill": facts_skill,
+        "facts_tool": facts_tool,
     }
     with open(JSON_PATH, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
