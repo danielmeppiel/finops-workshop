@@ -187,7 +187,7 @@ function renderHtml(data) {
   .ev .etime { color:var(--text-color-muted,#8b949e); font-variant-numeric:tabular-nums; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .ev .etype { color:var(--bar); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; }
   .ev .esum { color:var(--text-color-default,#e6edf3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .ev pre { margin:0; padding:10px 12px 14px; background:var(--background-color-inset,#010409); font-size:11.5px; line-height:1.5; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
+  .ev pre { margin:0; padding:10px 12px 14px; color:var(--text-color-default,#e6edf3); background:rgba(128,128,128,.10); font-size:11.5px; line-height:1.5; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
   @media (max-width: 900px) { .cards { grid-template-columns: repeat(3,1fr); } .mcards { grid-template-columns:repeat(2,1fr); } .ev > summary { grid-template-columns:64px 1fr; } .ev .etype { grid-column:2; } }
 </style>
 </head>
