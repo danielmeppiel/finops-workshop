@@ -98,7 +98,7 @@ function renderHtml(data) {
   <div class="sub" id="generated"></div>
   <div class="legend">
     <span class="pill"><span class="d meas"></span> <b>Measured</b> — from real token telemetry &amp; events</span>
-    <span class="pill"><span class="d est"></span> <b>Estimated</b> — proportional split by invocation count</span>
+    <span class="pill"><span class="d est"></span> <b>Not attributable</b> — truthful per-skill/tool $ is not derivable; rank by usage</span>
   </div>
   <div class="cards" id="cards"></div>
   <section>
@@ -107,14 +107,14 @@ function renderHtml(data) {
     <div class="note">Session USD/credits come from each session's real per-model token counts (input / output / cache).</div>
   </section>
   <section>
-    <h2>Most-used skills <span class="tag m">calls measured</span> <span class="tag e">cost estimated</span></h2>
+    <h2>Most-used skills <span class="tag m">usage measured</span></h2>
     <div id="skills"></div>
-    <div class="note">Calls counted from real <code>skill.invoked</code> events. USD is each session's measured cost split <i>proportionally by invocation count</i> — events expose no per-skill token spans, so treat $ as an estimate, not a meter.</div>
+    <div class="note"><b>Calls &amp; sessions are measured</b> from real <code>skill.invoked</code> events. <b>Session $ touched</b> = total <i>metered</i> cost of the sessions where this skill ran — <b>not</b> cost attributed to the skill. Truthful per-skill cost is <b>not derivable</b> from events (true value ranges $0 → whole session). Rank by usage, not these dollars.</div>
   </section>
   <section>
-    <h2>Most-used tools <span class="tag m">calls measured</span> <span class="tag e">cost estimated</span></h2>
+    <h2>Most-used tools <span class="tag m">usage measured</span></h2>
     <div id="tools"></div>
-    <div class="note">Same attribution caveat as skills.</div>
+    <div class="note">Same basis as skills: calls/sessions measured; <b>Session $ touched</b> is metered session cost, not per-tool attribution.</div>
   </section>
 </main>
 <script>
@@ -147,14 +147,14 @@ function renderHtml(data) {
     const s = data.top_skills||[];
     if(!s.length) return '<div class="note">No skill invocations recorded.</div>';
     const max = Math.max(...s.map(r=>r.invocation_count||0),1);
-    return '<table><thead><tr><th>Skill</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Est. USD</th><th class="num">Est. credits</th><th>Usage</th></tr></thead><tbody>'+
-      s.map(r=>'<tr><td class="name">'+esc(r.skill_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtInt(r.sessions)+'</td><td class="num">'+fmtMoney(r.attributed_usd)+'</td><td class="num">'+fmtCredits(r.attributed_credits)+'</td>'+bar(r.invocation_count,max)+'</tr>').join('')+
+    return '<table><thead><tr><th>Skill</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Session $ touched</th><th>Usage</th></tr></thead><tbody>'+
+      s.map(r=>'<tr><td class="name">'+esc(r.skill_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtInt(r.sessions)+'</td><td class="num">'+fmtMoney(r.session_usd_touched)+'</td>'+bar(r.invocation_count,max)+'</tr>').join('')+
       '</tbody></table>';
   }
   function renderTools(){
     const max = Math.max(...data.top_tools.map(r=>r.invocation_count||0),1);
-    return '<table><thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Est. USD</th><th class="num">Est. tokens</th><th>Usage</th></tr></thead><tbody>'+
-      data.top_tools.map(r=>'<tr><td class="name">'+esc(r.tool_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtMoney(r.attributed_usd)+'</td><td class="num">'+fmtTok(r.attributed_total_tokens)+'</td>'+bar(r.invocation_count,max)+'</tr>').join('')+
+    return '<table><thead><tr><th>Tool</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Session $ touched</th><th>Usage</th></tr></thead><tbody>'+
+      data.top_tools.map(r=>'<tr><td class="name">'+esc(r.tool_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtInt(r.sessions)+'</td><td class="num">'+fmtMoney(r.session_usd_touched)+'</td>'+bar(r.invocation_count,max)+'</tr>').join('')+
       '</tbody></table>';
   }
   document.getElementById('sessions').innerHTML = renderSessions();
@@ -189,7 +189,7 @@ const session = await joinSession({
         createCanvas({
             id: "finops-dashboard",
             displayName: "FinOps cost dashboard",
-            description: "Local Copilot cost telemetry: top sessions by cost, most-used skills and tools (calls measured, cost estimated).",
+            description: "Local Copilot cost telemetry: top sessions by metered cost, plus most-used skills and tools (ranked by measured usage).",
             actions: [
                 {
                     name: "refresh",

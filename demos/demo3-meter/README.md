@@ -56,20 +56,32 @@ so you can rank skill usage separately.
 ```json
 {
   "generated_at": "...",
+  "method_note": "Per-session $/credits/tokens are METERED; skills/tools ranked by MEASURED usage; 'session_usd_touched' is metered session cost where the skill/tool ran, NOT per-skill attribution.",
   "summary": {"session_count": 0, "usd": 0.0, "credits": 0.0, "total_tokens": 0, "tool_call_count": 0},
   "top_sessions": [{"session_id": "...", "models": "...", "total_tokens": 0, "aiu": null, "usd": 0.0, "credits": 0.0}],
-  "top_tools": [{"tool_name": "...", "invocation_count": 0, "attributed_total_tokens": 0.0, "attributed_usd": 0.0, "attributed_credits": 0.0}],
+  "top_tools":  [{"tool_name": "...",  "invocation_count": 0, "sessions": 0, "session_usd_touched": 0.0, "session_credits_touched": 0.0}],
+  "top_skills": [{"skill_name": "...", "invocation_count": 0, "sessions": 0, "session_usd_touched": 0.0, "session_credits_touched": 0.0}],
   "metadata": {"tool_attribution_method": "..."}
 }
 ```
 
+`session_usd_touched` = `SUM(session.usd)` over the distinct sessions where that skill/tool appeared.
+It is a **metered** number (real session cost), but it is **not** cost caused by the skill — see below.
+
 ## Canvas handoff
 
 `dashboard.html` is self-contained (no network deps) and can be wrapped directly as a Copilot canvas,
-or a live-refresh canvas can render `top_sessions` and `top_tools` from `dashboard_data.json`.
+or a live-refresh canvas can render `top_sessions`, `top_skills` and `top_tools` from `dashboard_data.json`.
 
-## Honest limitation
+## Honest limitation (read this before quoting any number)
 
-Per-skill/per-tool cost is **proportional attribution** by invocation count within each session —
-current events do not expose per-tool token spans. Session-level totals are exact; per-tool splits are estimates.
-See `VALIDATION.md` for the validation method and the hand-check formula.
+- **Metered (trust as fact):** per-session and per-model `$`/credits/tokens, from `session.shutdown` model telemetry.
+- **Measured (trust as fact):** skill/tool **invocation counts** and the **set of sessions** each ran in,
+  from real `skill.invoked` / tool events.
+- **NOT derivable:** truthful **per-skill / per-tool dollars**. Events expose no per-turn input/cache/cost and
+  no skill completion span, so a skill invocation's true cost could be anywhere from `$0` to the whole session.
+  The dashboard therefore **ranks skills/tools by usage**, and shows `session_usd_touched` (metered cost of the
+  sessions they ran in) only as a "where does spend concentrate" signal — **never** as attributed per-skill cost.
+
+The DB still carries legacy `attributed_*` columns (count-proportional estimate); the dashboard no longer
+surfaces them as per-skill cost. See `VALIDATION.md` for the metered hand-check and the attribution audit.

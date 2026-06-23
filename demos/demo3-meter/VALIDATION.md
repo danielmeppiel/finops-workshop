@@ -44,6 +44,12 @@ The ETL is run across **all** local sessions and the DB/dashboard totals are cro
 internal consistency (per-model sums = session totals = dashboard summary). Diverse sessions are
 spot-checked: zero/near-zero cost, multi-model, cache-heavy, premium-request, and partial/malformed logs.
 
-## Known limitation
-Per-tool / per-skill cost is **proportional attribution** by invocation count within a session;
-events do not expose per-tool token spans. Session-level numbers are exact; per-tool splits are estimates.
+## Known limitation (attribution audit)
+
+Per-session and per-model `$`/credits/tokens are **metered** (exact). Skill/tool **invocation counts** and the
+**sessions** they ran in are **measured** (exact). But truthful **per-skill / per-tool dollars are NOT derivable**
+from the events: there is no per-turn input/cache/cost and no skill completion span, so a single invocation's true
+cost ranges from `$0` to the entire session. The dashboard therefore ranks by **usage** and reports
+`session_usd_touched` (metered cost of the sessions a skill/tool ran in) as a concentration signal only —
+**not** as cost attributed to the skill. The legacy count-proportional `attributed_*` estimate is retained in the
+DB for reference but is no longer presented as per-skill cost.
