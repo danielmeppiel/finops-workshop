@@ -6,10 +6,21 @@
   <h1 class="ttl">It's already in your logs. No new SaaS.</h1>
   <div class="gov">A sessionEnd hook reads logs you already produce and reports tokens · AIU · credits · cost-per-outcome.</div>
 
-  <div style="position:absolute;left:80px;top:214px;width:430px">
-    <div style="font-size:14px;color:#8fd9e8;font-weight:800;letter-spacing:1px">sessionEnd hook</div>
-    <div style="font-size:42px;color:#50e6ff;margin:18px 0">↓</div>
-    <div style="font-size:22px;color:#fff;font-weight:800;line-height:1.25">logs you already produce<br><span style="color:#aab3c2;font-weight:500">→ tokens · AIU · credits · $</span></div>
+  <div class="pipe">
+    <div class="step">
+      <div class="lbl">hook</div>
+      <div class="txt">sessionEnd</div>
+    </div>
+    <div class="arr">↓</div>
+    <div class="step">
+      <div class="lbl">reads</div>
+      <div class="txt">logs you already produce</div>
+    </div>
+    <div class="arr">↓</div>
+    <div class="step">
+      <div class="lbl">reports</div>
+      <div class="txt">tokens · AIU · credits · $</div>
+    </div>
   </div>
 
   <div style="position:absolute;left:600px;top:198px;width:560px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:16px;padding:28px 34px">
@@ -24,4 +35,11 @@
   <div style="position:absolute;left:64px;top:594px;width:1152px;text-align:center;font-size:19px;font-weight:800;color:#eafaff">cost-per-outcome, from raw telemetry</div>
   <div class="tagr">The Agentic SDLC Bill · Demo 3</div>
 </div>
+<style>
+  .pipe{position:absolute;left:96px;top:228px;width:430px;display:flex;flex-direction:column;align-items:flex-start;gap:10px}
+  .pipe .step{display:flex;flex-direction:column;align-items:flex-start}
+  .pipe .lbl{font-size:12px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:#8fd9e8}
+  .pipe .txt{font-size:23px;font-weight:800;color:#fff;margin-top:7px;line-height:1.2}
+  .pipe .arr{font-size:24px;line-height:1;color:#50e6ff;margin:2px 0 2px 6px}
+</style>
 </body></html>

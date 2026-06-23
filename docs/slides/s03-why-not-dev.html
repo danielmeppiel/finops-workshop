@@ -7,28 +7,32 @@
   <div class="gov">We do not ask every developer to rediscover the cheap path in the moment.</div>
 
   <div class="memory-card">
-    <svg width="330" height="178" viewBox="0 0 330 178" xmlns="http://www.w3.org/2000/svg">
-      <g fill="none" stroke="#9aa3b0" stroke-width="6" stroke-linecap="round">
-        <circle cx="74" cy="54" r="32"/><path d="M24 144c10-42 90-42 100 0"/>
+    <svg class="ico" width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+      <g fill="none" stroke="#aab1bd" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M122 58 A48 48 0 1 0 121 99"/>
+        <path d="M120 30 L122 58 L96 52"/>
       </g>
-      <path d="M142 72h42M142 102h28M142 132h16" stroke="#cfd4dc" stroke-width="10" stroke-linecap="round"/>
-      <text x="244" y="96" text-anchor="middle" font-family="var(--font)" font-size="66" font-weight="800" fill="#c26b3f" opacity=".9">?</text>
+      <g stroke="#cfd4dc" stroke-width="8" stroke-linecap="round">
+        <line x1="50" y1="62" x2="96" y2="62"/>
+        <line x1="50" y1="80" x2="84" y2="80" opacity=".62"/>
+        <line x1="50" y1="98" x2="72" y2="98" opacity=".34"/>
+      </g>
     </svg>
     <div class="vlabel bad">memory resets</div>
     <div class="caption">every run, every team</div>
   </div>
 
   <div class="artifact-card">
-    <svg width="330" height="178" viewBox="0 0 330 178" xmlns="http://www.w3.org/2000/svg">
-      <path d="M98 24h104l34 34v96H98z" fill="#fff" stroke="#6c7931" stroke-width="5" rx="10"/>
-      <path d="M202 24v36h34" fill="none" stroke="#6c7931" stroke-width="5"/>
-      <rect x="124" y="74" width="86" height="28" rx="7" fill="#eef0e0"/>
-      <text x="167" y="94" text-anchor="middle" font-family="var(--mono)" font-size="16" font-weight="800" fill="#33401a">v1.2</text>
-      <path d="M124 120h86M124 138h64" stroke="#aab27a" stroke-width="7" stroke-linecap="round"/>
-      <g font-family="var(--font)" font-size="13" font-weight="800" fill="#33401a">
-        <rect x="18" y="126" width="54" height="28" rx="8" fill="#eef0e0"/><text x="45" y="145" text-anchor="middle">run</text>
-        <rect x="246" y="74" width="54" height="28" rx="8" fill="#eef0e0"/><text x="273" y="93" text-anchor="middle">run</text>
-        <rect x="246" y="126" width="54" height="28" rx="8" fill="#eef0e0"/><text x="273" y="145" text-anchor="middle">run</text>
+    <svg class="ico" width="150" height="150" viewBox="0 0 150 150" xmlns="http://www.w3.org/2000/svg">
+      <rect x="52" y="22" width="62" height="80" rx="9" fill="none" stroke="#aab27a" stroke-width="5"/>
+      <path d="M36 36 h46 l20 20 v62 a5 5 0 0 1 -5 5 h-56 a5 5 0 0 1 -5 -5 z"
+            fill="#fff" stroke="#6c7931" stroke-width="6" stroke-linejoin="round"/>
+      <path d="M82 36 v20 h20" fill="none" stroke="#6c7931" stroke-width="6" stroke-linejoin="round"/>
+      <rect x="44" y="70" width="40" height="20" rx="6" fill="#eef0e0"/>
+      <text x="64" y="85" text-anchor="middle" font-family="var(--mono)" font-size="14" font-weight="800" fill="#33401a">v1.2</text>
+      <g stroke="#aab27a" stroke-width="6" stroke-linecap="round">
+        <line x1="44" y1="104" x2="92" y2="104"/>
+        <line x1="44" y1="118" x2="74" y2="118"/>
       </g>
     </svg>
     <div class="vlabel good">artifact repeats</div>
@@ -44,5 +48,6 @@
   .memory-card{left:116px;border-top:6px solid #cfd4dc}.artifact-card{left:734px;border-top:6px solid var(--olive)}
   .vlabel{font-size:17px;font-weight:800;letter-spacing:.9px;text-transform:uppercase;margin-top:4px}.vlabel.bad{color:var(--rust-ink)}.vlabel.good{color:var(--olive-ink)}
   .caption{font-size:14px;color:var(--muted);margin-top:8px}
+  .ico{display:block;margin:0 auto 10px}
 </style>
 </body></html>
