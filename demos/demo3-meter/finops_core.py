@@ -343,6 +343,97 @@ def read_events_file(path: str) -> List[Dict[str, Any]]:
     return events
 
 
+def _model_cost_pools(session: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+    pools: Dict[str, Dict[str, float]] = {}
+    for model_row in session.get("models") or []:
+        model = canonical_model(str(model_row.get("model") or "unknown"))
+        tokens = model_row.get("tokens") or {}
+        pools[model] = {
+            "output_tokens": float(tokens.get("output", 0) or 0),
+            "usd": float(model_row.get("usd") or 0.0),
+            "credits": float(model_row.get("credits") or 0.0),
+        }
+    return pools
+
+
+def compute_skill_windows(events: List[Dict[str, Any]], session: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Measure skill-bounded assistant output tokens and model their USD share.
+
+    A skill window starts at skill.invoked and ends at the next user.message or
+    skill.invoked, whichever comes first. This keeps windows non-overlapping.
+    Dollar values are estimates: each model's metered session USD is apportioned
+    by the window's share of that model's metered output tokens.
+    """
+    ordered = sorted(enumerate(events), key=lambda item: (item[1].get("timestamp") or "", item[0]))
+    pools = _model_cost_pools(session)
+    fallback_model = next(iter(pools)) if len(pools) == 1 else None
+    windows: List[Dict[str, Any]] = []
+    active: Optional[Dict[str, Any]] = None
+    next_window_index = 0
+
+    def close_active(end_time: Optional[str]) -> None:
+        nonlocal active
+        if not active:
+            return
+        outputs_by_model = active["outputs_by_model"]
+        if not outputs_by_model:
+            outputs_by_model = {"none": 0}
+        first_model = True
+        for model, output_tokens in sorted(outputs_by_model.items()):
+            pool = pools.get(model, {})
+            denominator = float(pool.get("output_tokens", 0) or 0)
+            windows.append(
+                {
+                    "window_index": active["window_index"],
+                    "skill_name": active["skill_name"],
+                    "model": model,
+                    "window_start_time": active["window_start_time"],
+                    "window_end_time": end_time,
+                    "window_output_tokens": int(output_tokens),
+                    "denominator_output_tokens": int(denominator),
+                    "model_session_usd": float(pool.get("usd", 0.0) or 0.0),
+                    "window_usd_est": 0.0,
+                    "window_credits_est": 0.0,
+                    "invocation_count": 1 if first_model else 0,
+                }
+            )
+            first_model = False
+        active = None
+
+    for _idx, event in ordered:
+        typ = event.get("type")
+        ts = event.get("timestamp")
+        data = event.get("data") or {}
+        if typ == "user.message":
+            close_active(ts)
+        elif typ == "skill.invoked":
+            close_active(ts)
+            active = {
+                "window_index": next_window_index,
+                "skill_name": str(data.get("name") or "unknown_skill"),
+                "window_start_time": ts,
+                "outputs_by_model": defaultdict(int),
+            }
+            next_window_index += 1
+        elif typ == "assistant.message" and active:
+            model = canonical_model(str(data.get("model"))) if data.get("model") else (fallback_model or "unknown")
+            active["outputs_by_model"][model] += int(data.get("outputTokens") or 0)
+    close_active(session.get("end_time") or max((event.get("timestamp") for event in events if event.get("timestamp")), default=None))
+    window_totals_by_model: Counter[str] = Counter()
+    for row in windows:
+        window_totals_by_model[row["model"]] += int(row["window_output_tokens"] or 0)
+    for row in windows:
+        model = row["model"]
+        denominator = float(row["denominator_output_tokens"] or 0)
+        if denominator <= 0 or window_totals_by_model[model] > denominator:
+            continue
+        share = float(row["window_output_tokens"] or 0) / denominator
+        pool = pools.get(model, {})
+        row["window_usd_est"] = float(pool.get("usd", 0.0) or 0.0) * share
+        row["window_credits_est"] = float(pool.get("credits", 0.0) or 0.0) * share
+    return windows
+
+
 def summarize_event_file(session_id: str, path: str) -> Dict[str, Any]:
     events = read_events_file(path)
     starts = [e for e in events if e.get("type") == "session.start"]
@@ -379,6 +470,7 @@ def summarize_event_file(session_id: str, path: str) -> Dict[str, Any]:
     }
     if shutdowns:
         result.update(session_from_shutdown(session_id, shutdowns[-1]))
+    result["skill_windows"] = compute_skill_windows(events, result)
     return result
 
 

@@ -84,6 +84,8 @@ function renderHtml(data) {
   .num { text-align:right; font-variant-numeric: tabular-nums; }
   .sid { font-family: var(--font-mono, ui-monospace, Menlo, monospace); font-size:11.5px; color: var(--text-color-muted,#8b949e); }
   .name { font-weight:600; }
+  .models { font-size:11px; color:var(--text-color-muted,#8b949e); }
+  .dt { white-space:nowrap; }
   .barcell { width:130px; }
   .bar { height:7px; background: var(--border-color-muted,#21262d); border-radius:999px; overflow:hidden; }
   .fill { height:100%; background: linear-gradient(90deg, var(--bar), color-mix(in srgb, var(--bar) 55%, transparent)); }
@@ -97,24 +99,30 @@ function renderHtml(data) {
   <h1>MEASURE your own Copilot cost</h1>
   <div class="sub" id="generated"></div>
   <div class="legend">
-    <span class="pill"><span class="d meas"></span> <b>Measured</b> — from real token telemetry &amp; events</span>
-    <span class="pill"><span class="d est"></span> <b>Not attributable</b> — truthful per-skill/tool $ is not derivable; rank by usage</span>
+    <span class="pill"><span class="d meas"></span> <b>Metered</b> — per-session &amp; per-model $ from real token telemetry</span>
+    <span class="pill"><span class="d meas"></span> <b>Measured</b> — skill/tool usage &amp; window output tokens from events</span>
+    <span class="pill"><span class="d est"></span> <b>Modeled</b> — windowed skill $ apportioned from metered session cost</span>
   </div>
   <div class="cards" id="cards"></div>
   <section>
-    <h2>Top sessions by cost <span class="tag m">measured</span></h2>
+    <h2>Cost by model <span class="tag m">metered</span></h2>
+    <div id="models"></div>
+    <div class="note">Per-model tokens and $ across all local sessions, from <code>session.shutdown</code> telemetry. The <b>model sets the unit rate</b>; tokens are the volume — rate &times; volume is the bill.</div>
+  </section>
+  <section>
+    <h2>Top sessions by cost <span class="tag m">metered</span></h2>
     <div id="sessions"></div>
     <div class="note">Session USD/credits come from each session's real per-model token counts (input / output / cache).</div>
   </section>
   <section>
-    <h2>Most-used skills <span class="tag m">usage measured</span></h2>
+    <h2>Most-used skills <span class="tag m">usage + window tokens measured</span> <span class="tag e">window $ modeled</span></h2>
     <div id="skills"></div>
-    <div class="note"><b>Calls &amp; sessions are measured</b> from real <code>skill.invoked</code> events. <b>Session $ touched</b> = total <i>metered</i> cost of the sessions where this skill ran — <b>not</b> cost attributed to the skill. Truthful per-skill cost is <b>not derivable</b> from events (true value ranges $0 → whole session). Rank by usage, not these dollars.</div>
+    <div class="note"><b>Calls, sessions &amp; window output tokens are measured</b> — output generated from each <code>skill.invoked</code> until the next user turn. <b>Window $ (est)</b> apportions the metered session cost by that window's share of output tokens (events carry no per-turn input/cache cost, so the $ is modeled). Bounded to the skill's active window — far tighter than a whole-session figure.</div>
   </section>
   <section>
     <h2>Most-used tools <span class="tag m">usage measured</span></h2>
     <div id="tools"></div>
-    <div class="note">Same basis as skills: calls/sessions measured; <b>Session $ touched</b> is metered session cost, not per-tool attribution.</div>
+    <div class="note"><b>Session $ touched</b> = metered cost of the sessions where the tool ran, not per-tool attribution (point tools aren't windowed).</div>
   </section>
 </main>
 <script>
@@ -137,18 +145,26 @@ function renderHtml(data) {
   document.getElementById('cards').innerHTML = cards.map(([l,v]) =>
     '<div class="card"><div class="label">'+l+'</div><div class="value">'+v+'</div></div>').join('');
   function bar(v,max){ return '<td class="barcell"><div class="bar"><div class="fill" style="width:'+(100*(v||0)/(max||1))+'%"></div></div></td>'; }
+  function renderModels(){
+    const m = data.per_model||[];
+    if(!m.length) return '<div class="note">No model telemetry.</div>';
+    const max = Math.max(...m.map(r=>r.usd||0),1);
+    return '<table><thead><tr><th>Model</th><th class="num">Requests</th><th class="num">Input</th><th class="num">Cache rd</th><th class="num">Cache wr</th><th class="num">Output</th><th class="num">USD</th><th>Cost</th></tr></thead><tbody>'+
+      m.map(r=>'<tr><td class="name">'+esc(r.model)+'</td><td class="num">'+fmtInt(r.requests)+'</td><td class="num">'+fmtTok(r.input_tokens)+'</td><td class="num">'+fmtTok(r.cache_read_tokens)+'</td><td class="num">'+fmtTok(r.cache_write_tokens)+'</td><td class="num">'+fmtTok(r.output_tokens)+'</td><td class="num">'+fmtMoney(r.usd)+'</td>'+bar(r.usd,max)+'</tr>').join('')+
+      '</tbody></table>';
+  }
   function renderSessions(){
     const max = Math.max(...data.top_sessions.map(r=>r.usd||0),1);
-    return '<table><thead><tr><th>Session</th><th>Repository</th><th class="num">USD</th><th class="num">Credits</th><th class="num">Tokens</th><th>Cost</th></tr></thead><tbody>'+
-      data.top_sessions.map(r=>'<tr><td class="sid" title="'+esc(r.session_id)+'">'+short(r.session_id)+'</td><td>'+esc(r.repository||'—')+'</td><td class="num">'+fmtMoney(r.usd)+'</td><td class="num">'+fmtCredits(r.credits)+'</td><td class="num">'+fmtTok(r.total_tokens)+'</td>'+bar(r.usd,max)+'</tr>').join('')+
+    return '<table><thead><tr><th>Session</th><th>Date</th><th>Models</th><th class="num">USD</th><th class="num">Credits</th><th class="num">Tokens</th><th>Cost</th></tr></thead><tbody>'+
+      data.top_sessions.map(r=>'<tr><td class="sid" title="'+esc(r.session_id)+'">'+short(r.session_id)+'</td><td class="num dt">'+esc(r.start_date||'—')+'</td><td class="models">'+esc(r.models||'—')+'</td><td class="num">'+fmtMoney(r.usd)+'</td><td class="num">'+fmtCredits(r.credits)+'</td><td class="num">'+fmtTok(r.total_tokens)+'</td>'+bar(r.usd,max)+'</tr>').join('')+
       '</tbody></table>';
   }
   function renderSkills(){
     const s = data.top_skills||[];
     if(!s.length) return '<div class="note">No skill invocations recorded.</div>';
-    const max = Math.max(...s.map(r=>r.invocation_count||0),1);
-    return '<table><thead><tr><th>Skill</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Session $ touched</th><th>Usage</th></tr></thead><tbody>'+
-      s.map(r=>'<tr><td class="name">'+esc(r.skill_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtInt(r.sessions)+'</td><td class="num">'+fmtMoney(r.session_usd_touched)+'</td>'+bar(r.invocation_count,max)+'</tr>').join('')+
+    const max = Math.max(...s.map(r=>r.window_usd_est||0),1);
+    return '<table><thead><tr><th>Skill</th><th class="num">Calls</th><th class="num">Sessions</th><th class="num">Window out tok</th><th class="num">Window $ (est)</th><th>Window cost</th></tr></thead><tbody>'+
+      s.map(r=>'<tr><td class="name">'+esc(r.skill_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtInt(r.sessions)+'</td><td class="num">'+fmtTok(r.window_output_tokens)+'</td><td class="num">'+fmtMoney(r.window_usd_est)+'</td>'+bar(r.window_usd_est,max)+'</tr>').join('')+
       '</tbody></table>';
   }
   function renderTools(){
@@ -157,6 +173,7 @@ function renderHtml(data) {
       data.top_tools.map(r=>'<tr><td class="name">'+esc(r.tool_name)+'</td><td class="num">'+fmtInt(r.invocation_count)+'</td><td class="num">'+fmtInt(r.sessions)+'</td><td class="num">'+fmtMoney(r.session_usd_touched)+'</td>'+bar(r.invocation_count,max)+'</tr>').join('')+
       '</tbody></table>';
   }
+  document.getElementById('models').innerHTML = renderModels();
   document.getElementById('sessions').innerHTML = renderSessions();
   document.getElementById('skills').innerHTML = renderSkills();
   document.getElementById('tools').innerHTML = renderTools();

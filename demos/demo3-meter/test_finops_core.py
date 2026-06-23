@@ -98,6 +98,122 @@ class FinopsCoreTests(unittest.TestCase):
         self.assertAlmostEqual(result["bash"]["usd"], 1.5)
         self.assertAlmostEqual(result["skill:pdf"]["tokens_total"], 25.0)
 
+    def test_skill_windows_are_non_overlapping_and_leave_prefix_unattributed(self):
+        events = [
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:00.000Z", "data": {}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 11}},
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:02.000Z", "data": {"name": "pdf"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:03.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 7}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:04.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 3}},
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:05.000Z", "data": {"name": "workiq"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:06.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 5}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:07.000Z", "data": {}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:08.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 13}},
+        ]
+        session = {
+            "models": [
+                {
+                    "model": "claude-opus-4.8",
+                    "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 20},
+                    "usd": 2.0,
+                    "credits": 200.0,
+                }
+            ]
+        }
+
+        windows = fc.compute_skill_windows(events, session)
+
+        self.assertEqual(
+            [(w["skill_name"], w["window_start_time"], w["window_end_time"], w["model"], w["window_output_tokens"]) for w in windows],
+            [
+                ("pdf", "2026-01-01T00:00:02.000Z", "2026-01-01T00:00:05.000Z", "claude-opus-4-8", 10),
+                ("workiq", "2026-01-01T00:00:05.000Z", "2026-01-01T00:00:07.000Z", "claude-opus-4-8", 5),
+            ],
+        )
+        self.assertAlmostEqual(windows[0]["window_usd_est"], 1.0)
+        self.assertAlmostEqual(windows[1]["window_usd_est"], 0.5)
+
+    def test_skill_windows_apportion_each_model_from_metered_model_pool(self):
+        events = [
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:00.000Z", "data": {"name": "azure-pricing"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 40}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:02.000Z", "data": {"model": "claude-sonnet-4.6", "outputTokens": 60}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:03.000Z", "data": {}},
+        ]
+        session = {
+            "models": [
+                {
+                    "model": "claude-opus-4.8",
+                    "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 80},
+                    "usd": 8.0,
+                    "credits": 800.0,
+                },
+                {
+                    "model": "claude-sonnet-4.6",
+                    "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 120},
+                    "usd": 12.0,
+                    "credits": 1200.0,
+                },
+            ]
+        }
+
+        windows = fc.compute_skill_windows(events, session)
+
+        by_model = {w["model"]: w for w in windows}
+        self.assertEqual(by_model["claude-opus-4-8"]["window_output_tokens"], 40)
+        self.assertEqual(by_model["claude-opus-4-8"]["denominator_output_tokens"], 80)
+        self.assertAlmostEqual(by_model["claude-opus-4-8"]["window_usd_est"], 4.0)
+        self.assertEqual(by_model["claude-sonnet-4-6"]["window_output_tokens"], 60)
+        self.assertEqual(by_model["claude-sonnet-4-6"]["denominator_output_tokens"], 120)
+        self.assertAlmostEqual(by_model["claude-sonnet-4-6"]["window_usd_est"], 6.0)
+
+    def test_skill_window_usd_is_not_modeled_when_measured_output_exceeds_metered_pool(self):
+        events = [
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:00.000Z", "data": {"name": "workiq"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"model": "claude-opus-4.8", "outputTokens": 15}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:02.000Z", "data": {}},
+        ]
+        session = {
+            "models": [
+                {
+                    "model": "claude-opus-4.8",
+                    "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 10},
+                    "usd": 1.0,
+                    "credits": 100.0,
+                }
+            ]
+        }
+
+        windows = fc.compute_skill_windows(events, session)
+
+        self.assertEqual(windows[0]["window_output_tokens"], 15)
+        self.assertEqual(windows[0]["denominator_output_tokens"], 10)
+        self.assertAlmostEqual(windows[0]["window_usd_est"], 0.0)
+
+    def test_skill_window_uses_sole_session_model_when_message_model_is_missing(self):
+        events = [
+            {"type": "skill.invoked", "timestamp": "2026-01-01T00:00:00.000Z", "data": {"name": "apm-review-panel"}},
+            {"type": "assistant.message", "timestamp": "2026-01-01T00:00:01.000Z", "data": {"outputTokens": 25}},
+            {"type": "user.message", "timestamp": "2026-01-01T00:00:02.000Z", "data": {}},
+        ]
+        session = {
+            "models": [
+                {
+                    "model": "claude-opus-4.7",
+                    "tokens": {"input": 0, "cache_read": 0, "cache_write": 0, "output": 100},
+                    "usd": 4.0,
+                    "credits": 400.0,
+                }
+            ]
+        }
+
+        windows = fc.compute_skill_windows(events, session)
+
+        self.assertEqual(windows[0]["model"], "claude-opus-4-7")
+        self.assertEqual(windows[0]["window_output_tokens"], 25)
+        self.assertEqual(windows[0]["denominator_output_tokens"], 100)
+        self.assertAlmostEqual(windows[0]["window_usd_est"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

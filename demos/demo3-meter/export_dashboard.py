@@ -24,13 +24,28 @@ def main() -> int:
     top_sessions = rows(
         conn,
         """
-        SELECT session_id, source, models, total_tokens, input_tokens, output_tokens, cache_read_tokens,
-               cache_write_tokens, aiu, usd, credits, premium_requests, responses, tool_call_count,
-               start_time, end_time, repository
+        SELECT session_id, SUBSTR(start_time, 1, 10) AS start_date, models, total_tokens, aiu, usd, credits
         FROM sessions
         WHERE usd > 0
         ORDER BY usd DESC
         LIMIT 25
+        """,
+    )
+    per_model = rows(
+        conn,
+        """
+        SELECT model,
+               SUM(responses) AS requests,
+               SUM(input_tokens) AS input_tokens,
+               SUM(cache_read_tokens) AS cache_read_tokens,
+               SUM(cache_write_tokens) AS cache_write_tokens,
+               SUM(output_tokens) AS output_tokens,
+               SUM(total_tokens) AS total_tokens,
+               SUM(usd) AS usd,
+               SUM(credits) AS credits
+        FROM session_models
+        GROUP BY model
+        ORDER BY usd DESC, output_tokens DESC
         """,
     )
     top_tools = rows(
@@ -52,16 +67,31 @@ def main() -> int:
     top_skills = rows(
         conn,
         """
-        SELECT SUBSTR(st.tool_name, 7) AS skill_name,
-               SUM(st.invocation_count) AS invocation_count,
-               COUNT(DISTINCT st.session_id) AS sessions,
-               SUM(COALESCE(s.usd, 0)) AS session_usd_touched,
-               SUM(COALESCE(s.credits, 0)) AS session_credits_touched
-        FROM session_tools st
-        LEFT JOIN sessions s ON s.session_id = st.session_id
-        WHERE st.tool_name LIKE 'skill:%'
-        GROUP BY st.tool_name
-        ORDER BY invocation_count DESC
+        WITH skill_counts AS (
+            SELECT SUBSTR(tool_name, 7) AS skill_name,
+                   SUM(invocation_count) AS invocation_count,
+                   COUNT(DISTINCT session_id) AS sessions
+            FROM session_tools
+            WHERE tool_name LIKE 'skill:%'
+            GROUP BY SUBSTR(tool_name, 7)
+        ),
+        window_costs AS (
+            SELECT skill_name,
+                   SUM(window_output_tokens) AS window_output_tokens,
+                   SUM(window_usd_est) AS window_usd_est,
+                   SUM(window_credits_est) AS window_credits_est
+            FROM session_skill_windows
+            GROUP BY skill_name
+        )
+        SELECT sc.skill_name,
+               sc.invocation_count,
+               sc.sessions,
+               COALESCE(wc.window_output_tokens, 0) AS window_output_tokens,
+               COALESCE(wc.window_usd_est, 0) AS window_usd_est,
+               COALESCE(wc.window_credits_est, 0) AS window_credits_est
+        FROM skill_counts sc
+        LEFT JOIN window_costs wc ON wc.skill_name = sc.skill_name
+        ORDER BY window_usd_est DESC, invocation_count DESC
         LIMIT 25
         """,
     )
@@ -69,26 +99,19 @@ def main() -> int:
         conn,
         """
         SELECT COUNT(*) AS session_count, SUM(usd) AS usd, SUM(credits) AS credits,
-               SUM(total_tokens) AS total_tokens, SUM(tool_call_count) AS tool_call_count,
-               SUM(CASE WHEN nano_aiu IS NOT NULL THEN 1 ELSE 0 END) AS sessions_with_aiu
+               SUM(total_tokens) AS total_tokens, SUM(tool_call_count) AS tool_call_count
         FROM sessions
         """,
     )[0]
     conn.close()
     data = {
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "method_note": (
-            "Per-session USD/credits/tokens are METERED from session.shutdown model telemetry. "
-            "Skills/tools are ranked by MEASURED invocation counts. 'session_usd_touched' is the "
-            "total metered cost of sessions where the skill/tool appeared, NOT cost attributed to it; "
-            "truthful per-skill/tool cost is not derivable from events (range $0..session cost). "
-            "See demos/demo3-meter/VALIDATION.md."
-        ),
+        "method_note": "Session/model dollars are METERED; skill window_output_tokens are MEASURED; window_usd_est is MODELED by output-token apportionment of metered session cost when the measured window output fits the metered model pool; tools are ranked by usage.",
         "summary": summary,
+        "per_model": per_model,
         "top_sessions": top_sessions,
-        "top_tools": top_tools,
         "top_skills": top_skills,
-        "metadata": meta,
+        "top_tools": top_tools,
     }
     with open(JSON_PATH, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2)
@@ -127,9 +150,10 @@ td {{ border-bottom:1px solid #f1f5f9; padding:8px; vertical-align:middle; }}
 <h1>Demo 3 — MEASURE your own Copilot cost</h1>
 <div class=\"sub\" id=\"generated\"></div>
 <div class=\"cards\" id=\"cards\"></div>
+<section><h2>Per-model totals</h2><div id=\"models\"></div><div class=\"note\"><b>Measured</b> — totals come from <code>session.shutdown.data.modelMetrics</code> / <code>session_models</code>.</div></section>
 <section><h2>Top sessions by cost</h2><div id=\"sessions\"></div><div class=\"note\"><b>Measured</b> — session USD/credits come from real per-session model token telemetry (input/output/cache).</div></section>
-<section><h2>Most-used skills</h2><div id=\"skills\"></div><div class=\"note\"><b>Calls &amp; sessions are measured</b> from real <code>skill.invoked</code> events. <b>Session $ touched</b> = total <i>metered</i> cost of the sessions where this skill ran — it is <b>not</b> cost attributed to the skill. Truthful per-skill cost is <b>not derivable</b> from the events (a skill invocation is one line among thousands; true per-skill cost could be anywhere from $0 to the whole session). Rank by usage, not by these dollars.</div></section>
-<section><h2>Most-used tools</h2><div id=\"tools\"></div><div class=\"note\">Same basis as skills: calls/sessions measured; <b>Session $ touched</b> is metered session cost, not per-tool attribution.</div></section>
+<section><h2>Skill windows</h2><div id=\"skills\"></div><div class=\"note\"><b>Calls, sessions, and window output tokens are measured</b> from real <code>skill.invoked</code> and <code>assistant.message.outputTokens</code> events. <b>Window USD is an estimate</b>: each skill window runs from invocation to the next user message or next skill invocation, then receives that model's metered session USD by output-token share when measured window output fits the metered model pool. If not, dollars are left unmodeled rather than over-allocated. Per-message input/cache/cost are absent, so true per-skill dollars are not directly meterable.</div></section>
+<section><h2>Most-used tools</h2><div id=\"tools\"></div><div class=\"note\">Tools are point operations, not token windows: calls/sessions are measured; <b>Session $ touched</b> is metered session cost where the tool ran, not per-tool attribution.</div></section>
 </main>
 <script>
 const data = {embedded};
@@ -148,20 +172,26 @@ const cards = [
 document.getElementById('cards').innerHTML = cards.map(([l,v]) => `<div class=card><div class=label>${{l}}</div><div class=value>${{v}}</div></div>`).join('');
 function renderSessions() {{
  const max = Math.max(...data.top_sessions.map(r => r.usd||0), 1);
- return `<table><thead><tr><th>Session</th><th>Model(s)</th><th class=num>Credits</th><th class=num>USD</th><th class=num>Tokens</th><th class=num>AIU</th><th>Cost bar</th></tr></thead><tbody>` +
- data.top_sessions.map(r => `<tr><td class=sid title="${{r.session_id}}">${{short(r.session_id)}}</td><td>${{r.models||r.source}}</td><td class=num>${{fmtCredits(r.credits)}}</td><td class=num>${{fmtMoney(r.usd)}}</td><td class=num>${{fmtInt(r.total_tokens)}}</td><td class=num>${{r.aiu==null?'—':Number(r.aiu).toFixed(3)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.usd||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
+ return `<table><thead><tr><th>Session</th><th>Date</th><th>Model(s)</th><th class=num>Credits</th><th class=num>USD</th><th class=num>Tokens</th><th class=num>AIU</th><th>Cost bar</th></tr></thead><tbody>` +
+ data.top_sessions.map(r => `<tr><td class=sid title="${{r.session_id}}">${{short(r.session_id)}}</td><td>${{r.start_date||'—'}}</td><td>${{r.models||'—'}}</td><td class=num>${{fmtCredits(r.credits)}}</td><td class=num>${{fmtMoney(r.usd)}}</td><td class=num>${{fmtInt(r.total_tokens)}}</td><td class=num>${{r.aiu==null?'—':Number(r.aiu).toFixed(3)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.usd||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
+}}
+function renderModels() {{
+ if (!data.per_model || !data.per_model.length) return '<div class=note>No metered model rows recorded.</div>';
+ return `<table><thead><tr><th>Model</th><th class=num>Requests</th><th class=num>Input</th><th class=num>Cache read</th><th class=num>Cache write</th><th class=num>Output</th><th class=num>Total tokens</th><th class=num>Credits</th><th class=num>USD</th></tr></thead><tbody>` +
+ data.per_model.map(r => `<tr><td>${{r.model}}</td><td class=num>${{fmtInt(r.requests)}}</td><td class=num>${{fmtInt(r.input_tokens)}}</td><td class=num>${{fmtInt(r.cache_read_tokens)}}</td><td class=num>${{fmtInt(r.cache_write_tokens)}}</td><td class=num>${{fmtInt(r.output_tokens)}}</td><td class=num>${{fmtInt(r.total_tokens)}}</td><td class=num>${{fmtCredits(r.credits)}}</td><td class=num>${{fmtMoney(r.usd)}}</td></tr>`).join('') + `</tbody></table>`;
 }}
 function renderSkills() {{
  if (!data.top_skills || !data.top_skills.length) return '<div class=note>No skill invocations recorded.</div>';
- const max = Math.max(...data.top_skills.map(r => r.invocation_count||0), 1);
- return `<table><thead><tr><th>Skill</th><th class=num>Calls</th><th class=num>Sessions</th><th class=num>Session $ touched</th><th>Usage bar</th></tr></thead><tbody>` +
- data.top_skills.map(r => `<tr><td>${{r.skill_name}}</td><td class=num>${{fmtInt(r.invocation_count)}}</td><td class=num>${{fmtInt(r.sessions)}}</td><td class=num>${{fmtMoney(r.session_usd_touched)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.invocation_count||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
+ const max = Math.max(...data.top_skills.map(r => r.window_usd_est||0), 1);
+ return `<table><thead><tr><th>Skill</th><th class=num>Calls</th><th class=num>Sessions</th><th class=num>Window output tokens</th><th class=num>Window credits est.</th><th class=num>Window USD est.</th><th>Est. cost bar</th></tr></thead><tbody>` +
+ data.top_skills.map(r => `<tr><td>${{r.skill_name}}</td><td class=num>${{fmtInt(r.invocation_count)}}</td><td class=num>${{fmtInt(r.sessions)}}</td><td class=num>${{fmtInt(r.window_output_tokens)}}</td><td class=num>${{fmtCredits(r.window_credits_est)}}</td><td class=num>${{fmtMoney(r.window_usd_est)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.window_usd_est||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
 }}
 function renderTools() {{
  const max = Math.max(...data.top_tools.map(r => r.invocation_count||0), 1);
  return `<table><thead><tr><th>Tool</th><th class=num>Calls</th><th class=num>Sessions</th><th class=num>Session $ touched</th><th>Usage bar</th></tr></thead><tbody>` +
  data.top_tools.map(r => `<tr><td>${{r.tool_name}}</td><td class=num>${{fmtInt(r.invocation_count)}}</td><td class=num>${{fmtInt(r.sessions)}}</td><td class=num>${{fmtMoney(r.session_usd_touched)}}</td><td class=barcell><div class=bar><div class=fill style="width:${{100*(r.invocation_count||0)/max}}%"></div></div></td></tr>`).join('') + `</tbody></table>`;
 }}
+document.getElementById('models').innerHTML = renderModels();
 document.getElementById('sessions').innerHTML = renderSessions();
 document.getElementById('skills').innerHTML = renderSkills();
 document.getElementById('tools').innerHTML = renderTools();

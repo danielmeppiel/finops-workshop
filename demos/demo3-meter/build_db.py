@@ -19,6 +19,7 @@ STATE_DIR = os.path.expanduser(os.environ.get("COPILOT_SESSION_STATE_DIR", "~/.c
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
+        DROP TABLE IF EXISTS session_skill_windows;
         DROP TABLE IF EXISTS session_models;
         DROP TABLE IF EXISTS session_tools;
         DROP TABLE IF EXISTS sessions;
@@ -84,6 +85,23 @@ def init_db(conn: sqlite3.Connection) -> None:
             FOREIGN KEY (session_id) REFERENCES sessions(session_id)
         );
 
+        CREATE TABLE session_skill_windows (
+            session_id TEXT NOT NULL,
+            window_index INTEGER NOT NULL,
+            skill_name TEXT NOT NULL,
+            model TEXT NOT NULL,
+            window_start_time TEXT,
+            window_end_time TEXT,
+            window_output_tokens INTEGER NOT NULL DEFAULT 0,
+            denominator_output_tokens INTEGER NOT NULL DEFAULT 0,
+            model_session_usd REAL NOT NULL DEFAULT 0,
+            window_usd_est REAL NOT NULL DEFAULT 0,
+            window_credits_est REAL NOT NULL DEFAULT 0,
+            invocation_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (session_id, window_index, model),
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        );
+
         CREATE TABLE etl_metadata (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -144,6 +162,30 @@ def upsert_session(conn: sqlite3.Connection, session: dict) -> None:
                 "per-session proportional by invocation count; no per-tool token spans in events",
             ),
         )
+    for window in session.get("skill_windows") or []:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO session_skill_windows (
+                session_id, window_index, skill_name, model, window_start_time, window_end_time,
+                window_output_tokens, denominator_output_tokens, model_session_usd, window_usd_est,
+                window_credits_est, invocation_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session["session_id"],
+                window.get("window_index"),
+                window.get("skill_name"),
+                window.get("model"),
+                window.get("window_start_time"),
+                window.get("window_end_time"),
+                window.get("window_output_tokens") or 0,
+                window.get("denominator_output_tokens") or 0,
+                window.get("model_session_usd") or 0.0,
+                window.get("window_usd_est") or 0.0,
+                window.get("window_credits_est") or 0.0,
+                window.get("invocation_count") or 0,
+            ),
+        )
 
 
 def load_event_sessions() -> dict:
@@ -189,6 +231,8 @@ def main() -> int:
         if not existing or not existing.get("has_shutdown") or not (existing.get("usd") or 0):
             if existing:
                 raw.update({k: existing.get(k) for k in ("events_path", "start_time", "end_time", "cwd", "repository", "selected_model", "tool_call_count", "invocation_counts", "has_shutdown") if existing.get(k) is not None})
+                if existing.get("events_path"):
+                    raw["skill_windows"] = fc.compute_skill_windows(fc.read_events_file(existing["events_path"]), raw)
             merged[sid] = raw
     conn = sqlite3.connect(DB_PATH)
     init_db(conn)
@@ -202,7 +246,8 @@ def main() -> int:
         "merged_sessions": len(merged),
         "raw_log_parse_errors": parse_errors,
         "credit_usd": fc.CREDIT_USD,
-        "tool_attribution_method": "Per-session tokens/USD/credits are allocated across skill/tool invocation counts because events expose tool/skill call counts but not per-tool token spans.",
+        "tool_attribution_method": "Tools keep measured invocation counts and distinct sessions; dashboard dollars are metered session cost where the tool ran, not per-tool attribution.",
+        "skill_window_method": "Skill windows start at skill.invoked and end at the next user.message or next skill.invoked. window_output_tokens are measured assistant.message outputTokens; window_usd_est is modeled by output-token-share apportionment of metered per-model session USD when measured window output fits the metered model pool.",
     }
     for key, value in meta.items():
         conn.execute("INSERT OR REPLACE INTO etl_metadata (key, value) VALUES (?, ?)", (key, json.dumps(value)))
